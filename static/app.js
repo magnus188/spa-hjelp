@@ -1,6 +1,5 @@
 let state = null;
 let toastTimeout = null;
-let chlorineDelta = null;
 let actionBusy = false;
 
 const $ = (selector) => document.querySelector(selector);
@@ -63,7 +62,7 @@ function renderReadings() {
     $(`#${key}-meta`).textContent = value == null ? 'Ikke målt' :
       measuredAt && measuredAt !== measurement.measured_at ? shortDate(measuredAt) : '';
   }
-  $('#last-measured').textContent = `Sist målt: ${localDate(measurement.measured_at)}`;
+  $('#last-measured').textContent = `Sist målt: ${localDate(measurement.measured_at)} · ${fmt(state.volume_liters, 0)} L`;
 }
 
 function renderHistory() {
@@ -153,11 +152,17 @@ $('#history-open').addEventListener('click', async () => {
     openDialog('#history-dialog');
   } catch (error) { toast(error.message, true); }
 });
-$('#chlorine-open').addEventListener('click', () => {
-  $('#chlorine-result').hidden = true;
-  $('#chlorine-confirm').hidden = true;
-  chlorineDelta = null;
-  openDialog('#chlorine-dialog');
+$('#adjust-open').addEventListener('click', () => {
+  const fields = [
+    ['alkalinity_mg_l', 'alkalinity'], ['ph', 'ph'],
+    ['chlorine_mg_l', 'chlorine'], ['active_oxygen_mg_l', 'oxygen'],
+  ];
+  $('#adjust-form').reset();
+  for (const [field, id] of fields) {
+    const value = state.measurements[field];
+    $(`#adjust-current-${id}`).textContent = value == null ? 'Sist målt: —' : `Sist målt: ${fmt(value, 2)}`;
+  }
+  openDialog('#adjust-dialog');
 });
 document.querySelectorAll('.dialog-close').forEach((button) => button.addEventListener('click', () => closeDialog(button.closest('dialog'))));
 document.querySelectorAll('dialog').forEach((dialog) => dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); }));
@@ -215,24 +220,18 @@ $('#confirm-step').addEventListener('click', () => {
   run(() => api('/api/confirm', {}), 'Steget er registrert.');
 });
 
-$('#chlorine-form').addEventListener('submit', (event) => {
+$('#adjust-form').addEventListener('submit', (event) => {
   event.preventDefault();
-  const value = Number(event.currentTarget.elements.delta_mg_l.value);
+  const form = event.currentTarget;
+  const increments = Object.fromEntries(
+    ['alkalinity_mg_l', 'ph', 'chlorine_mg_l', 'active_oxygen_mg_l']
+      .map((field) => [field, numberOrNull(form.elements[field].value)])
+      .filter(([, value]) => value != null)
+  );
   run(async () => {
-    const estimate = await api('/api/chlorine-estimate', { delta_mg_l: value });
-    chlorineDelta = value;
-    $('#chlorine-result').innerHTML = `<strong>Ca. ${fmt(estimate.amount_ml, 3)} ml / ${fmt(estimate.scoops, 4)} skjeer</strong>
-      <p>Teoretisk klornivå etterpå: ${fmt(estimate.projected_mg_l, 2)} mg/L.</p>
-      ${estimate.hard_to_measure ? '<p class="warning">Mindre enn ¼ måleskje: vanskelig å måle nøyaktig.</p>' : ''}
-      <p class="warning">${text(estimate.warning)}</p>`;
-    $('#chlorine-result').hidden = false;
-    $('#chlorine-confirm').hidden = false;
-  });
-});
-
-$('#chlorine-confirm').addEventListener('click', () => {
-  if (chlorineDelta == null) return;
-  run(async () => { await api('/api/chlorine-add', { delta_mg_l: chlorineDelta }); closeDialog($('#chlorine-dialog')); }, 'MiniChlor er registrert. Hold lokket åpent i 20 minutter.');
+    await api('/api/flows', { kind: 'adjust', increments });
+    closeDialog($('#adjust-dialog'));
+  }, 'Justeringen er startet. Følg neste steg.');
 });
 
 setInterval(tick, 1000);

@@ -66,6 +66,19 @@ class RecipeTests(unittest.TestCase):
                                additions, NOW)
         self.assertEqual(stale["type"], "measure")
 
+    def test_adjustment_rejects_readings_taken_before_wait_ends(self):
+        adjustment = flow("adjust", meta={"targets": {"alkalinity_mg_l": 100}})
+        added = [{"product": "alka_up", "flow_id": 1,
+                  "added_at": (NOW - timedelta(hours=1)).isoformat()}]
+        early_reading = measurement(alkalinity_mg_l=100,
+                                    measured_at=(NOW - timedelta(minutes=5)).isoformat())
+        self.assertEqual(recommendation(adjustment, {"volume_liters": 1500},
+                                        early_reading, added, NOW)["type"], "wait")
+        added[0]["added_at"] = (NOW - timedelta(hours=3)).isoformat()
+        early_reading["measured_at"] = (NOW - timedelta(hours=2, minutes=30)).isoformat()
+        self.assertEqual(recommendation(adjustment, {"volume_liters": 1500},
+                                        early_reading, added, NOW)["type"], "measure")
+
     def test_before_bath_uses_sundances_extra_spoon_after_three_people(self):
         rec = recommendation(flow("before_bath", meta={"bathers": 5}),
                              {"volume_liters": 1700}, measurement(), [], NOW)

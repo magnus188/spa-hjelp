@@ -27,9 +27,17 @@ O₂-verdien loggføres, men brukes foreløpig ikke til å beregne en dose.
 
 [GitHub Pages-utgaven](https://magnus188.github.io/spa-hjelp/) har samme
 skjema, rutiner, doseberegninger og lokk-timer uten server. Målinger,
-innstillinger og tilsetninger lagres bare i nettleseren du bruker. De deles
+innstillinger og tilsetninger lagres i `localStorage` på denne nettleseren. De
+overlever sideoppdatering, omstart og nye versjoner av nettsiden, men deles
 ikke med hjemmeserverens SQLite-database, Home Assistant eller PoolLab, og kan
-forsvinne hvis nettleserdata slettes.
+forsvinne hvis nettleserdata slettes. En annen enhet har egne data.
+
+Nye installasjoner starter med 1500 liter. En tidligere lagret verdi beholdes.
+I «Juster verdier» kan du velge økning for alkalinitet, pH, fritt klor og O₂.
+Veiviseren følger alkalinitet → pH → MiniChlor → pumpesyklus → Active Oxygen,
+med ny måling mellom trinnene. SpaCare oppgir ingen pålitelig omregning fra
+Active Oxygen Granular til en bestemt målt O₂-økning. Derfor brukes Sundances
+før-bad-dose når O₂ er valgt, og verdien må kontrolleres etterpå.
 
 De statiske filene i `docs/` bygges fra Flask-malen og appens produktliste med:
 

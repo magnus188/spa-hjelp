@@ -37,8 +37,8 @@ def build() -> None:
     )
     html = html.replace(
         '    <div class="top-grid">',
-        '    <p class="pages-note">Målinger og innstillinger lagres bare i denne nettleseren. '
-        'Denne utgaven er ikke koblet til Home Assistant eller PoolLab.</p>\n'
+        '    <p class="pages-note">Målinger, volum og timer lagres i denne nettleseren, også etter '
+        'sideoppdatering. De følger ikke med til andre enheter og forsvinner hvis nettsteddata slettes.</p>\n'
         '    <div class="top-grid">',
         1,
     )

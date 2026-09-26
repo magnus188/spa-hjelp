@@ -150,6 +150,32 @@ def create_app(test_config: dict | None = None) -> Flask:
                 raise ValueError("Returdato må være etter avreise.")
             meta = {"departure_date": departure.isoformat(), "return_date": return_date.isoformat()}
         with connect(app.config["DB_PATH"]) as db:
+            if kind == "adjust":
+                measurement = latest_measurement(db)
+                limits = {
+                    "alkalinity_mg_l": ("alkalinitet", 100, 120),
+                    "ph": ("pH", 1, 7.4),
+                    "chlorine_mg_l": ("klor", 3, 20),
+                    "active_oxygen_mg_l": ("O₂", 10, 10),
+                }
+                raw = body.get("increments") or {}
+                if not isinstance(raw, dict) or any(key not in limits for key in raw):
+                    raise ValueError("Ukjent måleverdi i justeringen.")
+                targets = {}
+                for field, (label, maximum_rise, maximum_target) in limits.items():
+                    value = raw.get(field)
+                    if value in (None, "", 0):
+                        continue
+                    rise = _number(value, f"Økning i {label}", 0.01, maximum_rise)
+                    if not measurement or measurement[field] is None or not recent_measurement(measurement, utc_now(), field=field):
+                        raise ValueError(f"Registrer en ny måling av {label} først.")
+                    target = round(measurement[field] + rise, 3)
+                    if target > maximum_target:
+                        raise ValueError(f"Ønsket {label} må være høyst {maximum_target:g}.")
+                    targets[field] = target
+                if not targets:
+                    raise ValueError("Velg minst én ønsket økning.")
+                meta["targets"] = targets
             start_flow(db, kind, meta)
         return jsonify(ok=True), 201
 

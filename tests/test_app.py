@@ -82,9 +82,69 @@ class AppTests(unittest.TestCase):
     def test_active_oxygen_and_chlorine_cannot_be_logged_together(self):
         self.client.post("/api/chlorine-add", json={"delta_mg_l": 0.2})
         self.client.post("/api/flows", json={"kind": "before_bath", "bathers": 2})
+        self.assertEqual(self.client.get("/api/summary").json["next_step"]["type"], "wait")
         blocked = self.client.post("/api/confirm", json={})
         self.assertEqual(blocked.status_code, 400)
-        self.assertIn("ikke tilsettes samtidig", blocked.json["error"])
+        self.assertIn("ikke bekreftes", blocked.json["error"])
+
+    def test_default_volume_and_existing_volume_are_preserved(self):
+        fresh_path = str(Path(self.directory.name) / "fresh.sqlite3")
+        fresh = create_app({"TESTING": True, "DB_PATH": fresh_path}).test_client()
+        self.assertEqual(fresh.get("/api/summary").json["volume_liters"], 1500)
+        self.assertEqual(create_app({"TESTING": True, "DB_PATH": self.db_path})
+                         .test_client().get("/api/summary").json["volume_liters"], 1700)
+
+    def test_adjustment_sequence_waits_and_remeasures(self):
+        self.client.post("/api/settings", json={"volume_liters": 1500})
+        self.client.post("/api/measurements", json={
+            "alkalinity_mg_l": 70, "ph": 6.8, "chlorine_mg_l": 0.2,
+            "active_oxygen_mg_l": 2,
+        })
+        started = self.client.post("/api/flows", json={"kind": "adjust", "increments": {
+            "alkalinity_mg_l": 30, "ph": 0.4, "chlorine_mg_l": 0.2,
+            "active_oxygen_mg_l": 4,
+        }})
+        self.assertEqual(started.status_code, 201)
+        first = self.client.get("/api/summary").json["next_step"]
+        self.assertEqual(first["product"], "alka_up")
+        self.assertEqual(first["amount_ml"], 90)
+        self.client.post("/api/confirm", json={})
+        self.assertEqual(self.client.get("/api/summary").json["next_step"]["type"], "wait")
+        with connect(self.db_path) as db:
+            db.execute("UPDATE additions SET added_at = ? WHERE product = 'alka_up'",
+                       ((datetime.now(timezone.utc) - timedelta(hours=3)).isoformat(),))
+            db.execute("UPDATE measurements SET measured_at = ?",
+                       ((datetime.now(timezone.utc) - timedelta(hours=4)).isoformat(),))
+        self.assertEqual(self.client.get("/api/summary").json["next_step"]["type"], "measure")
+        self.client.post("/api/measurements", json={"alkalinity_mg_l": 100, "ph": 6.8})
+        second = self.client.get("/api/summary").json["next_step"]
+        self.assertEqual(second["product"], "ph_up")
+        self.assertEqual(second["amount_ml"], 15)
+        self.client.post("/api/confirm", json={})
+        with connect(self.db_path) as db:
+            db.execute("UPDATE additions SET added_at = ? WHERE product = 'ph_up'",
+                       ((datetime.now(timezone.utc) - timedelta(hours=3)).isoformat(),))
+        self.client.post("/api/measurements", json={"ph": 7.2, "chlorine_mg_l": 0.2})
+        third = self.client.get("/api/summary").json["next_step"]
+        self.assertEqual(third["product"], "mini_chlor")
+        self.assertAlmostEqual(third["amount_ml"], 0.545, places=3)
+        self.client.post("/api/confirm", json={})
+        self.assertEqual(self.client.get("/api/summary").json["next_step"]["type"], "wait")
+        with connect(self.db_path) as db:
+            db.execute("UPDATE additions SET added_at = ? WHERE product = 'mini_chlor'",
+                       ((datetime.now(timezone.utc) - timedelta(minutes=21)).isoformat(),))
+        self.client.post("/api/measurements", json={"chlorine_mg_l": 0.4,
+                                                     "active_oxygen_mg_l": 3})
+        fourth = self.client.get("/api/summary").json["next_step"]
+        self.assertEqual(fourth["product"], "active_oxygen")
+        self.assertEqual(fourth["amount_ml"], 45)
+        self.client.post("/api/confirm", json={})
+        with connect(self.db_path) as db:
+            db.execute("UPDATE additions SET added_at = ? WHERE product = 'active_oxygen'",
+                       ((datetime.now(timezone.utc) - timedelta(minutes=21)).isoformat(),))
+        self.client.post("/api/measurements", json={"active_oxygen_mg_l": 5,
+                                                     "chlorine_mg_l": 0.1})
+        self.assertEqual(self.client.get("/api/summary").json["next_step"]["type"], "done")
 
     def test_invalid_reading_rejected(self):
         bad = self.client.post("/api/measurements", json={"ph": 17})

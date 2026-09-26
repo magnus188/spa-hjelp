@@ -18,7 +18,8 @@ function client() {
 }
 
 let api = client();
-assert.equal((await api('/api/summary')).next_step.type, 'setup');
+assert.equal((await api('/api/summary')).volume_liters, 1500);
+assert.equal((await api('/api/summary')).next_step.type, 'measure');
 await api('/api/settings', { volume_liters: 1700, scoops: { mini_chlor: 10 } });
 await api('/api/measurements', {
   ph: 7.2, alkalinity_mg_l: 100, chlorine_mg_l: 0.2, active_oxygen_mg_l: 5,
@@ -51,7 +52,8 @@ assert.equal(summary.cover_open, true);
 assert.equal(summary.last_added.product, 'mini_chlor');
 assert.equal(summary.measurements.active_oxygen_mg_l, 7);
 await api('/api/flows', { kind: 'before_bath', bathers: 2 });
-await assert.rejects(api('/api/confirm', {}), /ikke tilsettes samtidig/);
+assert.equal((await api('/api/summary')).next_step.type, 'wait');
+await assert.rejects(api('/api/confirm', {}), /ikke bekreftes/);
 
 const today = new Date();
 const nextWeek = new Date(today); nextWeek.setDate(today.getDate() + 7);
@@ -83,5 +85,24 @@ await api('/api/flows', { kind: 'new_water' });
 assert.equal((await api('/api/summary')).next_step.amount_ml, 50);
 await api('/api/flows', { kind: 'before_bath', bathers: 5 });
 assert.equal((await api('/api/summary')).next_step.amount_ml, 75);
+
+saved.clear();
+api = client();
+await api('/api/measurements', {
+  alkalinity_mg_l: 100, ph: 7.2, chlorine_mg_l: 0.2, active_oxygen_mg_l: 2,
+});
+await api('/api/flows', { kind: 'adjust', increments: {
+  chlorine_mg_l: 0.2, active_oxygen_mg_l: 4,
+} });
+assert.equal((await api('/api/summary')).next_step.product, 'mini_chlor');
+assert.equal((await api('/api/summary')).next_step.amount_ml, 0.545);
+await api('/api/confirm', {});
+assert.equal((await api('/api/summary')).next_step.type, 'wait');
+let stored = JSON.parse(saved.get('spa-hjelp-pages-v1'));
+stored.additions.at(-1).added_at = new Date(Date.now() - 21 * 60 * 1000).toISOString();
+saved.set('spa-hjelp-pages-v1', JSON.stringify(stored));
+await api('/api/measurements', { chlorine_mg_l: 0.4, active_oxygen_mg_l: 3 });
+assert.equal((await api('/api/summary')).next_step.product, 'active_oxygen');
+assert.equal((await api('/api/summary')).next_step.amount_ml, 45);
 
 console.log('GitHub Pages API: målinger, doser, timer og ferie fungerer.');

@@ -71,8 +71,9 @@ def init_db(path: str) -> None:
         columns = {row["name"] for row in db.execute("PRAGMA table_info(measurements)")}
         if "active_oxygen_mg_l" not in columns:
             db.execute("ALTER TABLE measurements ADD COLUMN active_oxygen_mg_l REAL")
-        db.execute("INSERT OR IGNORE INTO settings (id, volume_liters, scoops_json) VALUES (1, NULL, ?)",
+        db.execute("INSERT OR IGNORE INTO settings (id, volume_liters, scoops_json) VALUES (1, 1500, ?)",
                    (json.dumps({key: item["default_scoop_ml"] for key, item in PRODUCTS.items()}),))
+        db.execute("UPDATE settings SET volume_liters = 1500 WHERE id = 1 AND volume_liters IS NULL")
 
 
 def get_settings(db: sqlite3.Connection) -> dict:

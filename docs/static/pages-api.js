@@ -20,7 +20,7 @@
   function emptyData() {
     return {
       settings: {
-        volume_liters: null,
+        volume_liters: 1500,
         scoops: Object.fromEntries(Object.entries(PRODUCTS).map(([key, product]) =>
           [key, product.default_scoop_ml])),
       },
@@ -38,6 +38,10 @@
     if (!data?.settings?.scoops || !Array.isArray(data.measurements) ||
         !Array.isArray(data.additions) || !Number.isInteger(data.next_id)) {
       throw new Error('Lagrede data har et ukjent format.');
+    }
+    if (data.settings.volume_liters == null) {
+      data.settings.volume_liters = 1500;
+      saveData(data);
     }
     return data;
   }
@@ -147,6 +151,128 @@
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
   }
 
+  function adjustmentStep(data, measurement, additions, now) {
+    const flow = data.flow;
+    const targets = flow.meta.targets;
+    const flowAdditions = additions.filter((item) => item.flow_id === flow.id);
+    const scale = data.settings.volume_liters / 1000;
+    const oxygenAdded = latestProductAddition(flowAdditions, 'active_oxygen');
+    if (oxygenAdded) {
+      const until = Date.parse(oxygenAdded.added_at) + 20 * 60 * 1000;
+      if (now < until) return message('wait', 'La Active Oxygen sirkulere',
+        'Vent til pumpesyklusen er ferdig før ny O₂-måling.', { until: new Date(until).toISOString() });
+      if (measurement?.active_oxygen_mg_l == null ||
+          Date.parse(measuredAtFor(measurement, 'active_oxygen_mg_l')) < until) {
+        return message('measure', 'Mål O₂ på nytt', 'Registrer faktisk O₂-verdi etter tilsetningen.');
+      }
+      return message('done', 'O₂ er kontrollmålt',
+        `Målt ${measurement.active_oxygen_mg_l} mg/L mot ønsket ${targets.active_oxygen_mg_l} mg/L. Sundance oppgir ingen doseformel for en bestemt O₂-økning. Vurder ny rutine ved behov.`);
+    }
+    for (const [field, label, products] of [
+      ['alkalinity_mg_l', 'alkalinitet', ['alka_up', 'alka_down']],
+      ['ph', 'pH', ['ph_up', 'ph_down']],
+    ]) {
+      if (measurement?.[field] == null || !recent(measurement, now, field)) {
+        return message('measure', `Mål ${label}`, `Registrer ${label} før neste kjemikalie.`);
+      }
+      const previous = flowAdditions.find((item) => products.includes(item.product));
+      if (previous) {
+        const until = Date.parse(previous.added_at) + 2 * 60 * 60 * 1000;
+        if (now < until) return message('wait', `La ${label} stabilisere seg`,
+          `Vent 2 timer og mål ${label} på nytt før neste produkt.`, { until: new Date(until).toISOString() });
+        if (Date.parse(measuredAtFor(measurement, field)) < until) {
+          return message('measure', `Mål ${label} på nytt`, `Registrer en ny ${label}-verdi før neste produkt.`);
+        }
+      }
+      const current = measurement[field];
+      let target = targets[field] ?? null;
+      if (field === 'ph') {
+        const previousTa = flowAdditions.find((item) => ['alka_up', 'alka_down'].includes(item.product));
+        if (previousTa && Date.parse(measuredAtFor(measurement, 'ph')) < Date.parse(previousTa.added_at) + 2 * 60 * 60 * 1000) {
+          return message('measure', 'Mål pH på nytt', 'Alkalinitetsjustering kan endre pH. Registrer en ny pH-verdi.');
+        }
+      }
+      if (field === 'alkalinity_mg_l') {
+        if (current < 80) target = Math.max(target ?? 80, 80);
+        else if (current > 120) target = 120;
+      } else if (current < 7.0) target = Math.max(target ?? 7.0, 7.0);
+      else if (current > 7.4) target = 7.4;
+      if (target !== null && current >= target && Object.hasOwn(targets, field) &&
+          current <= (field === 'alkalinity_mg_l' ? 120 : 7.4)) continue;
+      if (target === null || Math.abs(current - target) < (field === 'alkalinity_mg_l' ? 1 : 0.05)) continue;
+      if (field === 'alkalinity_mg_l') {
+        if (current < target) return dose('alka_up', Math.min(target - current, 30) / 30 * 60 * scale,
+          `Hev alkalinitet fra ${current} mot ${target} mg/L, ett trinn av gangen.`, SOURCES.alka_up,
+          'Løs opp i plastbøtte. Tilsett med pumpen på; mål på nytt etter 2 timer.', true, true);
+        return dose('alka_down', Math.min(current - target, 20) / 20 * 30 * scale,
+          `Senk alkalinitet fra ${current} mot ${target} mg/L, ett trinn av gangen.`, SOURCES.alka_down,
+          'Løs opp i plastbøtte. Pumper av i 1 time; start sirkulasjon og mål etter 2 timer.', true, true);
+      }
+      if (current < target) return dose('ph_up', Math.min(target - current, 0.2) / 0.2 * 10 * scale,
+        `Hev pH fra ${current} mot ${target}, ett trinn av gangen.`, SOURCES.ph_up,
+        'Tilsett med pumpen på. Mål på nytt etter 2 timer.', true, true);
+      return dose('ph_down', Math.min(current - target, 0.2) / 0.2 * 6 * scale,
+        `Senk pH fra ${current} mot ${target}, ett trinn av gangen.`, SOURCES.ph_down,
+        'Tilsett med pumpen på. Mål på nytt etter 2 timer.', true, true);
+    }
+
+    const lastBalance = flowAdditions.find((item) => ['alka_up', 'alka_down', 'ph_up', 'ph_down'].includes(item.product));
+    const chlorineTarget = targets.chlorine_mg_l;
+    if (chlorineTarget !== undefined) {
+      if (measurement?.chlorine_mg_l == null || !recent(measurement, now, 'chlorine_mg_l')) {
+        return message('measure', 'Mål klor', 'Registrer fritt klor før MiniChlor beregnes.');
+      }
+      if (lastBalance && Date.parse(measuredAtFor(measurement, 'chlorine_mg_l')) < Date.parse(lastBalance.added_at) + 2 * 60 * 60 * 1000) {
+        return message('measure', 'Mål klor på nytt', 'Mål etter justering av alkalinitet og pH.');
+      }
+      const previous = latestProductAddition(flowAdditions, 'mini_chlor');
+      if (previous) {
+        const until = Date.parse(previous.added_at) + 20 * 60 * 1000;
+        if (now < until) return message('wait', 'La MiniChlor sirkulere',
+          'Vent 20 minutter med pumpe 1 på før ny klormåling.', { until: new Date(until).toISOString() });
+        if (Date.parse(measuredAtFor(measurement, 'chlorine_mg_l')) < until) {
+          return message('measure', 'Mål klor på nytt', 'Registrer faktisk klorverdi før neste produkt.');
+        }
+      }
+      if (measurement.chlorine_mg_l + 0.05 < chlorineTarget) {
+        const lastOxygen = latestProductAddition(additions, 'active_oxygen');
+        if (lastOxygen && now < Date.parse(lastOxygen.added_at) + 20 * 60 * 1000) {
+          const until = Date.parse(lastOxygen.added_at) + 20 * 60 * 1000;
+          return message('wait', 'Vent før MiniChlor', 'Active Oxygen og MiniChlor skal ikke tilsettes samtidig.',
+            { until: new Date(until).toISOString() });
+        }
+        const amount = chlorineEstimate(chlorineTarget - measurement.chlorine_mg_l,
+          data.settings.volume_liters, 15, measurement.chlorine_mg_l).amount_ml;
+        return dose('mini_chlor', amount,
+          `Teoretisk dose for klor fra ${measurement.chlorine_mg_l} mot ${chlorineTarget} mg/L. Vannet kan forbruke klor; mål på nytt etterpå.`,
+          SOURCES.mini_chlor, 'La pumpe 1 gå, og tilsett over filteret.', true, true);
+      }
+    }
+
+    const oxygenTarget = targets.active_oxygen_mg_l;
+    if (oxygenTarget !== undefined) {
+      const lastChlorine = latestProductAddition(additions, 'mini_chlor');
+      if (lastChlorine) {
+        const until = Date.parse(lastChlorine.added_at) + 20 * 60 * 1000;
+        if (now < until) return message('wait', 'Vent før Active Oxygen',
+          'MiniChlor og Active Oxygen skal ikke tilsettes samtidig. La pumpe 1 gå ut 20-minuttersyklusen.',
+          { until: new Date(until).toISOString() });
+      }
+      if (measurement?.active_oxygen_mg_l == null || !recent(measurement, now, 'active_oxygen_mg_l')) {
+        return message('measure', 'Mål O₂', 'Registrer aktivt oksygen før dosering.');
+      }
+      if (lastChlorine && Date.parse(measuredAtFor(measurement, 'active_oxygen_mg_l')) < Date.parse(lastChlorine.added_at) + 20 * 60 * 1000) {
+        return message('measure', 'Mål O₂ etter klor', 'Registrer O₂ etter at MiniChlor har sirkulert i 20 minutter.');
+      }
+      if (measurement.active_oxygen_mg_l + 0.05 < oxygenTarget) {
+        return dose('active_oxygen', 45,
+          `Ønsket O₂: ${oxygenTarget} mg/L. Sundance anbefaler minst 3 skjeer før bad. Det finnes ingen dokumentert omregning fra ml til O₂-økning; mål igjen etterpå.`,
+          SOURCES.sundance, 'Tilsett over filteret med pumpe 1 på. Hold lokket åpent i 20 minutter.', false, true);
+      }
+    }
+    return message('done', 'Justeringen er ferdig', 'Verdiene er kontrollert. Mål igjen ved neste stell.');
+  }
+
   function recommendation(data, measurement, additions, now) {
     const volume = data.settings.volume_liters;
     const flow = data.flow;
@@ -181,6 +307,7 @@
       return message('done', 'Nytt vann er klart for neste måling',
         'Når vannet er varmt, mål alkalinitet først og deretter pH. Velg Ukentlig for justering.');
     }
+    if (kind === 'adjust') return adjustmentStep(data, measurement, additions, now);
     if (kind === 'weekly') {
       if (step !== 0) return message('done', 'Ukentlig stell ferdig', 'Mål vannet igjen ved neste stell eller bading.');
       const correction = additions.find((item) => item.flow_id === flow.id &&
@@ -200,6 +327,13 @@
     }
     if (kind === 'before_bath') {
       if (step === 0) {
+        const previous = latestProductAddition(additions, 'mini_chlor');
+        if (previous) {
+          const until = Date.parse(previous.added_at) + 20 * 60 * 1000;
+          if (now < until) return message('wait', 'Vent før Active Oxygen',
+            'MiniChlor og Active Oxygen skal ikke tilsettes samtidig. La pumpe 1 gå ut 20-minuttersyklusen.',
+            { until: new Date(until).toISOString() });
+        }
         const bathers = Number(flow.meta.bathers || 1);
         const count = 3 + Math.max(0, bathers - 3);
         return dose('active_oxygen', 15 * count,
@@ -348,6 +482,34 @@
         }
         if (body.return_date < body.departure_date) throw new Error('Returdato må være etter avreise.');
         meta = { departure_date: body.departure_date, return_date: body.return_date };
+      }
+      if (kind === 'adjust') {
+        const limits = {
+          alkalinity_mg_l: ['alkalinitet', 100, 120],
+          ph: ['pH', 1, 7.4],
+          chlorine_mg_l: ['klor', 3, 20],
+          active_oxygen_mg_l: ['O₂', 10, 10],
+        };
+        const increments = body?.increments || {};
+        if (typeof increments !== 'object' || Array.isArray(increments) ||
+            Object.keys(increments).some((key) => !limits[key])) {
+          throw new Error('Ukjent måleverdi i justeringen.');
+        }
+        const measurement = latestMeasurement(data);
+        const targets = {};
+        for (const [field, [label, maximumRise, maximumTarget]] of Object.entries(limits)) {
+          const value = increments[field];
+          if (value === null || value === undefined || value === '' || value === 0) continue;
+          const rise = number(value, `Økning i ${label}`, 0.01, maximumRise);
+          if (measurement?.[field] == null || !recent(measurement, Date.now(), field)) {
+            throw new Error(`Registrer en ny måling av ${label} først.`);
+          }
+          const target = round(measurement[field] + rise, 3);
+          if (target > maximumTarget) throw new Error(`Ønsket ${label} må være høyst ${maximumTarget}.`);
+          targets[field] = target;
+        }
+        if (!Object.keys(targets).length) throw new Error('Velg minst én ønsket økning.');
+        meta = { targets };
       }
       const now = stamp();
       data.flow = { id: data.next_id++, kind, step: 0, meta, created_at: now, updated_at: now };

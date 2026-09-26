@@ -11,6 +11,7 @@ SPACARE_ALKA_UP = "https://scandinavianspacare.no/wp-content/uploads/2017/10/Bru
 SPACARE_ALKA_DOWN = "https://scandinavianspacare.no/wp-content/uploads/2017/10/Bruksanvisning-for-SpaCare-Alka-Down-1.pdf"
 SPACARE_PH_UP = "https://scandinavianspacare.no/wp-content/uploads/2017/10/Bruksanvisning-for-SpaCare-pH-Up-Granular-1.pdf"
 SPACARE_PH_DOWN = "https://scandinavianspacare.no/wp-content/uploads/2017/10/Bruksanvisning-for-SpaCare-pH-Down-Granular.pdf"
+SPACARE_ACTIVE_OXYGEN = "https://scandinavianspacare.no/wp-content/uploads/2017/10/Bruksanvisning-for-SpaCare-Active-Oxygen-Granular-1.pdf"
 
 PRODUCTS = {
     "mini_chlor": {"name": "SpaCare MiniChlor", "default_scoop_ml": 15, "kind": "granulat"},
@@ -24,6 +25,7 @@ PRODUCTS = {
 }
 
 MODES = {
+    "adjust": "Juster verdier",
     "weekly": "Ukentlig",
     "before_bath": "Før bad",
     "after_bath": "Etter bad",
@@ -111,6 +113,124 @@ def _balance_step(measurement: dict, volume_liters: float, now: datetime) -> dic
     return None
 
 
+def _adjustment_step(flow: dict, measurement: dict, additions: list[dict],
+                     volume: float, now: datetime) -> dict:
+    """Guide requested rises in Sundance order, with a new reading after each dose."""
+    targets = flow["meta"]["targets"]
+    flow_additions = [item for item in additions if item["flow_id"] == flow["id"]]
+    scale = volume / 1000
+    oxygen_added = latest_product_addition(flow_additions, "active_oxygen")
+    if oxygen_added:
+        until = parse_time(oxygen_added["added_at"]) + timedelta(minutes=20)
+        if now < until:
+            return message("wait", "La Active Oxygen sirkulere",
+                           "Vent til pumpesyklusen er ferdig før ny O₂-måling.", until=iso_time(until))
+        if (measurement.get("active_oxygen_mg_l") is None or
+                parse_time(measured_at_for(measurement, "active_oxygen_mg_l")) < until):
+            return message("measure", "Mål O₂ på nytt", "Registrer faktisk O₂-verdi etter tilsetningen.")
+        result = measurement["active_oxygen_mg_l"]
+        return message("done", "O₂ er kontrollmålt",
+                       f"Målt {result:g} mg/L mot ønsket {targets['active_oxygen_mg_l']:g} mg/L. "
+                       "Sundance oppgir ingen doseformel for en bestemt O₂-økning. Vurder ny rutine ved behov.")
+    for field, label, products, hours in (
+        ("alkalinity_mg_l", "alkalinitet", ("alka_up", "alka_down"), 2),
+        ("ph", "pH", ("ph_up", "ph_down"), 2),
+    ):
+        if measurement.get(field) is None or not recent_measurement(measurement, now, field=field):
+            return message("measure", f"Mål {label}", f"Registrer {label} før neste kjemikalie.")
+        previous = next((item for item in flow_additions if item["product"] in products), None)
+        if previous:
+            until = parse_time(previous["added_at"]) + timedelta(hours=hours)
+            if now < until:
+                return message("wait", f"La {label} stabilisere seg",
+                               f"Vent 2 timer og mål {label} på nytt før neste produkt.", until=iso_time(until))
+            if parse_time(measured_at_for(measurement, field)) < until:
+                return message("measure", f"Mål {label} på nytt",
+                               f"Registrer en ny {label}-verdi før neste produkt.")
+        current = measurement[field]
+        target = targets.get(field)
+        if field == "ph":
+            previous_ta = next((item for item in flow_additions if item["product"] in ("alka_up", "alka_down")), None)
+            if previous_ta and parse_time(measured_at_for(measurement, "ph")) < parse_time(previous_ta["added_at"]) + timedelta(hours=2):
+                return message("measure", "Mål pH på nytt", "Alkalinitetsjustering kan endre pH. Registrer en ny pH-verdi.")
+        if field == "alkalinity_mg_l":
+            if current < 80:
+                target = max(target or 80, 80)
+            elif current > 120:
+                target = 120
+        elif current < 7.0:
+            target = max(target or 7.0, 7.0)
+        elif current > 7.4:
+            target = 7.4
+        if target is not None and current >= target and field in targets and current <= (120 if field == "alkalinity_mg_l" else 7.4):
+            continue
+        if target is None or abs(current - target) < (1 if field == "alkalinity_mg_l" else 0.05):
+            continue
+        if field == "alkalinity_mg_l":
+            if current < target:
+                amount = min(target - current, 30) / 30 * 60 * scale
+                return dose("alka_up", amount, f"Hev alkalinitet fra {current:g} mot {target:g} mg/L, ett trinn av gangen.",
+                            SPACARE_ALKA_UP, "Løs opp i plastbøtte. Tilsett med pumpen på; mål på nytt etter 2 timer.", True, True)
+            amount = min(current - target, 20) / 20 * 30 * scale
+            return dose("alka_down", amount, f"Senk alkalinitet fra {current:g} mot {target:g} mg/L, ett trinn av gangen.",
+                        SPACARE_ALKA_DOWN, "Løs opp i plastbøtte. Pumper av i 1 time; start sirkulasjon og mål etter 2 timer.", True, True)
+        if current < target:
+            amount = min(target - current, 0.2) / 0.2 * 10 * scale
+            return dose("ph_up", amount, f"Hev pH fra {current:g} mot {target:g}, ett trinn av gangen.",
+                        SPACARE_PH_UP, "Tilsett med pumpen på. Mål på nytt etter 2 timer.", True, True)
+        amount = min(current - target, 0.2) / 0.2 * 6 * scale
+        return dose("ph_down", amount, f"Senk pH fra {current:g} mot {target:g}, ett trinn av gangen.",
+                    SPACARE_PH_DOWN, "Tilsett med pumpen på. Mål på nytt etter 2 timer.", True, True)
+
+    last_balance = next((item for item in flow_additions if item["product"] in
+                         ("alka_up", "alka_down", "ph_up", "ph_down")), None)
+    chlorine_target = targets.get("chlorine_mg_l")
+    if chlorine_target is not None:
+        if measurement.get("chlorine_mg_l") is None or not recent_measurement(measurement, now, field="chlorine_mg_l"):
+            return message("measure", "Mål klor", "Registrer fritt klor før MiniChlor beregnes.")
+        if last_balance and parse_time(measured_at_for(measurement, "chlorine_mg_l")) < parse_time(last_balance["added_at"]) + timedelta(hours=2):
+            return message("measure", "Mål klor på nytt", "Mål etter justering av alkalinitet og pH.")
+        previous = latest_product_addition(flow_additions, "mini_chlor")
+        if previous:
+            until = parse_time(previous["added_at"]) + timedelta(minutes=20)
+            if now < until:
+                return message("wait", "La MiniChlor sirkulere", "Vent 20 minutter med pumpe 1 på før ny klormåling.", until=iso_time(until))
+            if parse_time(measured_at_for(measurement, "chlorine_mg_l")) < until:
+                return message("measure", "Mål klor på nytt", "Registrer faktisk klorverdi før neste produkt.")
+        if measurement["chlorine_mg_l"] + 0.05 < chlorine_target:
+            last_oxygen = latest_product_addition(additions, "active_oxygen")
+            if last_oxygen and now < parse_time(last_oxygen["added_at"]) + timedelta(minutes=20):
+                until = parse_time(last_oxygen["added_at"]) + timedelta(minutes=20)
+                return message("wait", "Vent før MiniChlor", "Active Oxygen og MiniChlor skal ikke tilsettes samtidig.", until=iso_time(until))
+            delta = chlorine_target - measurement["chlorine_mg_l"]
+            amount = chlorine_estimate(delta, volume, 15, measurement["chlorine_mg_l"])["amount_ml"]
+            return dose("mini_chlor", amount,
+                        f"Teoretisk dose for klor fra {measurement['chlorine_mg_l']:g} mot {chlorine_target:g} mg/L. "
+                        "Vannet kan forbruke klor; mål på nytt etterpå.",
+                        SPACARE_MINICHLOR, estimated=True, balance=True)
+
+    oxygen_target = targets.get("active_oxygen_mg_l")
+    if oxygen_target is not None:
+        last_chlorine = latest_product_addition(additions, "mini_chlor")
+        if last_chlorine:
+            until = parse_time(last_chlorine["added_at"]) + timedelta(minutes=20)
+            if now < until:
+                return message("wait", "Vent før Active Oxygen",
+                               "MiniChlor og Active Oxygen skal ikke tilsettes samtidig. La pumpe 1 gå ut 20-minuttersyklusen.",
+                               until=iso_time(until))
+        if measurement.get("active_oxygen_mg_l") is None or not recent_measurement(measurement, now, field="active_oxygen_mg_l"):
+            return message("measure", "Mål O₂", "Registrer aktivt oksygen før dosering.")
+        if last_chlorine and parse_time(measured_at_for(measurement, "active_oxygen_mg_l")) < parse_time(last_chlorine["added_at"]) + timedelta(minutes=20):
+            return message("measure", "Mål O₂ etter klor", "Registrer O₂ etter at MiniChlor har sirkulert i 20 minutter.")
+        if measurement["active_oxygen_mg_l"] + 0.05 < oxygen_target:
+            return dose("active_oxygen", 45,
+                        f"Ønsket O₂: {oxygen_target:g} mg/L. Sundance anbefaler minst 3 skjeer før bad. "
+                        "Det finnes ingen dokumentert omregning fra ml til O₂-økning; mål igjen etterpå.",
+                        SUNDANCE_GUIDE, "Tilsett over filteret med pumpe 1 på. Hold lokket åpent i 20 minutter.",
+                        estimated=False, balance=True)
+    return message("done", "Justeringen er ferdig", "Verdiene er kontrollert. Mål igjen ved neste stell.")
+
+
 def recommendation(flow: dict | None, settings: dict, measurement: dict | None,
                    additions: list[dict], now: datetime | None = None) -> dict:
     now = now or utc_now()
@@ -151,6 +271,9 @@ def recommendation(flow: dict | None, settings: dict, measurement: dict | None,
         return message("done", "Nytt vann er klart for neste måling",
                        "Når vannet er varmt, mål alkalinitet først og deretter pH. Velg Ukentlig for justering.")
 
+    if kind == "adjust":
+        return _adjustment_step(flow, measurement, additions, volume, now)
+
     if kind == "weekly":
         if step == 0:
             correction = next((item for item in additions if item["flow_id"] == flow_id and
@@ -171,6 +294,13 @@ def recommendation(flow: dict | None, settings: dict, measurement: dict | None,
 
     if kind == "before_bath":
         if step == 0:
+            previous = latest_product_addition(additions, "mini_chlor")
+            if previous:
+                until = parse_time(previous["added_at"]) + timedelta(minutes=20)
+                if now < until:
+                    return message("wait", "Vent før Active Oxygen",
+                                   "MiniChlor og Active Oxygen skal ikke tilsettes samtidig. La pumpe 1 gå ut 20-minuttersyklusen.",
+                                   until=iso_time(until))
             bathers = int(flow["meta"].get("bathers", 1))
             count = 3 + max(0, bathers - 3)
             return dose("active_oxygen", 15 * count,
