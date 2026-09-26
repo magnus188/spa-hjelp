@@ -77,8 +77,10 @@ def create_app(test_config: dict | None = None) -> Flask:
                 "ph": measurement["ph"] if measurement else None,
                 "alkalinity_mg_l": measurement["alkalinity_mg_l"] if measurement else None,
                 "chlorine_mg_l": measurement["chlorine_mg_l"] if measurement else None,
+                "active_oxygen_mg_l": measurement["active_oxygen_mg_l"] if measurement else None,
                 "measured_at": measurement["measured_at"] if measurement else None,
                 "source": measurement["source"] if measurement else None,
+                "field_measured_at": measurement["field_measured_at"] if measurement else None,
             },
             "last_additions": additions[:3],
             "last_added": last,
@@ -120,9 +122,10 @@ def create_app(test_config: dict | None = None) -> Flask:
             "ph": _number(body.get("ph"), "pH", 0, 14, required=False),
             "alkalinity_mg_l": _number(body.get("alkalinity_mg_l"), "Alkalinitet", 0, 500, required=False),
             "chlorine_mg_l": _number(body.get("chlorine_mg_l"), "Klor", 0, 20, required=False),
+            "active_oxygen_mg_l": _number(body.get("active_oxygen_mg_l"), "Aktivt oksygen", 0, 50, required=False),
             "source": "manual",
         }
-        if all(values[key] is None for key in ("ph", "alkalinity_mg_l", "chlorine_mg_l")):
+        if all(values[key] is None for key in ("ph", "alkalinity_mg_l", "chlorine_mg_l", "active_oxygen_mg_l")):
             raise ValueError("Legg inn minst én måleverdi.")
         with connect(app.config["DB_PATH"]) as db:
             save_measurement(db, values)
@@ -190,7 +193,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             measurement = latest_measurement(db)
         if not settings["volume_liters"]:
             raise ValueError("Angi bassengvolum først.")
-        if not measurement or measurement["chlorine_mg_l"] is None or not recent_measurement(measurement, utc_now()):
+        if not measurement or measurement["chlorine_mg_l"] is None or not recent_measurement(measurement, utc_now(), field="chlorine_mg_l"):
             raise ValueError("Registrer en ny klormåling først.")
         return jsonify(chlorine_estimate(delta, settings["volume_liters"],
                                          settings["scoops"]["mini_chlor"], measurement["chlorine_mg_l"]))
@@ -205,7 +208,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             additions = latest_additions(db)
             if not settings["volume_liters"] or not measurement or measurement["chlorine_mg_l"] is None:
                 raise ValueError("Registrer volum og en klormåling først.")
-            if not recent_measurement(measurement, utc_now()):
+            if not recent_measurement(measurement, utc_now(), field="chlorine_mg_l"):
                 raise ValueError("Registrer en ny klormåling først.")
             enforce_separation("mini_chlor", additions)
             estimate = chlorine_estimate(delta, settings["volume_liters"],

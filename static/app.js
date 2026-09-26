@@ -53,10 +53,14 @@ function renderReadings() {
     ['ph', measurement.ph, '', 2],
     ['alkalinity', measurement.alkalinity_mg_l, ' mg/L', 0],
     ['chlorine', measurement.chlorine_mg_l, ' mg/L', 2],
+    ['oxygen', measurement.active_oxygen_mg_l, ' mg/L', 2],
   ];
   for (const [key, value, unit, digits] of fields) {
     $(`#${key}-value`).textContent = value == null ? '—' : `${fmt(value, digits)}${unit}`;
-    $(`#${key}-meta`).textContent = value == null ? 'Ikke målt' : '';
+    const fieldName = { alkalinity: 'alkalinity_mg_l', chlorine: 'chlorine_mg_l', oxygen: 'active_oxygen_mg_l' }[key] || key;
+    const measuredAt = measurement.field_measured_at?.[fieldName];
+    $(`#${key}-meta`).textContent = value == null ? 'Ikke målt' :
+      measuredAt && measuredAt !== measurement.measured_at ? shortDate(measuredAt) : '';
   }
   $('#last-measured').textContent = `Sist målt: ${localDate(measurement.measured_at)}`;
 }
@@ -160,7 +164,7 @@ document.querySelectorAll('dialog').forEach((dialog) => dialog.addEventListener(
 $('#measurement-form').addEventListener('submit', (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const body = Object.fromEntries(['ph', 'alkalinity_mg_l', 'chlorine_mg_l'].map((key) => [key, numberOrNull(form.elements[key].value)]));
+  const body = Object.fromEntries(['ph', 'alkalinity_mg_l', 'chlorine_mg_l', 'active_oxygen_mg_l'].map((key) => [key, numberOrNull(form.elements[key].value)]));
   run(async () => { await api('/api/measurements', body); form.reset(); closeDialog($('#measurement-dialog')); }, 'Målingen er lagret.');
 });
 

@@ -7,6 +7,8 @@ berøringsskjerm i Home Assistant, men fungerer også på mobil.
 ## Dette gjør appen
 
 - Lagrer vannvolum, måleskje per produkt, manuelle målinger og tilsetningshistorikk i SQLite.
+  Teststrips kan registreres med pH, alkalinitet, fritt klor og O₂ (aktivt oksygen)
+  hver for seg. Siste verdi og måletidspunkt beholdes for hvert felt.
 - Viser ett neste steg for nytt vann, ukentlig stell, før/etter bad og ferie.
 - Regner om doser til ml og antall egne skjeer. Faste Sundance-doser er basert på
   **15 ml per Sundance-skje**, også når din egen skje har en annen størrelse.
@@ -19,6 +21,7 @@ berøringsskjerm i Home Assistant, men fungerer også på mobil.
 
 Appen styrer ikke badets pumper eller temperatur. Den avgjør heller ikke om
 vannet er klart for bading.
+O₂-verdien loggføres, men brukes foreløpig ikke til å beregne en dose.
 
 ## Start lokalt
 

@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 import shutil
+import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -88,6 +89,49 @@ class AppTests(unittest.TestCase):
     def test_invalid_reading_rejected(self):
         bad = self.client.post("/api/measurements", json={"ph": 17})
         self.assertEqual(bad.status_code, 400)
+        bad_oxygen = self.client.post("/api/measurements", json={"active_oxygen_mg_l": 60})
+        self.assertEqual(bad_oxygen.status_code, 400)
+
+    def test_oxygen_only_reading_keeps_other_values_and_chlorine_estimate(self):
+        response = self.client.post("/api/measurements", json={"active_oxygen_mg_l": 5})
+        self.assertEqual(response.status_code, 201)
+        summary = self.client.get("/api/summary").json
+        self.assertEqual(summary["measurements"]["active_oxygen_mg_l"], 5)
+        self.assertEqual(summary["measurements"]["ph"], 7.2)
+        self.assertEqual(summary["measurements"]["alkalinity_mg_l"], 100)
+        self.assertEqual(summary["measurements"]["chlorine_mg_l"], 0.2)
+        self.assertNotEqual(summary["measurements"]["field_measured_at"]["chlorine_mg_l"],
+                            summary["measurements"]["measured_at"])
+        estimate = self.client.post("/api/chlorine-estimate", json={"delta_mg_l": 0.2})
+        self.assertEqual(estimate.status_code, 200)
+        self.assertEqual(estimate.json["projected_mg_l"], 0.4)
+
+    def test_oxygen_only_does_not_make_old_chlorine_fresh(self):
+        old = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+        with connect(self.db_path) as db:
+            db.execute("UPDATE measurements SET measured_at = ?", (old,))
+        self.client.post("/api/measurements", json={"active_oxygen_mg_l": 7})
+        summary = self.client.get("/api/summary").json
+        self.assertEqual(summary["measurements"]["chlorine_mg_l"], 0.2)
+        estimate = self.client.post("/api/chlorine-estimate", json={"delta_mg_l": 0.2})
+        self.assertEqual(estimate.status_code, 400)
+        self.assertIn("ny klormåling", estimate.json["error"])
+
+    def test_existing_database_is_migrated_for_oxygen_readings(self):
+        legacy_path = str(Path(self.directory.name) / "legacy.sqlite3")
+        with sqlite3.connect(legacy_path) as db:
+            db.execute("""CREATE TABLE measurements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                measured_at TEXT NOT NULL, ph REAL, alkalinity_mg_l REAL,
+                chlorine_mg_l REAL, source TEXT NOT NULL)""")
+            db.execute("""INSERT INTO measurements
+                (measured_at, ph, alkalinity_mg_l, chlorine_mg_l, source)
+                VALUES (?, 7.1, 90, 0.3, 'manual')""", (datetime.now(timezone.utc).isoformat(),))
+        migrated = create_app({"TESTING": True, "DB_PATH": legacy_path}).test_client()
+        self.assertEqual(migrated.post("/api/measurements", json={"active_oxygen_mg_l": 6}).status_code, 201)
+        summary = migrated.get("/api/summary").json
+        self.assertEqual(summary["measurements"]["active_oxygen_mg_l"], 6)
+        self.assertEqual(summary["measurements"]["ph"], 7.1)
 
 
 if __name__ == "__main__":

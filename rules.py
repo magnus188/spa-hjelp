@@ -66,16 +66,23 @@ def latest_product_addition(additions: list[dict], product: str, flow_id: int | 
                  (flow_id is None or item["flow_id"] == flow_id)), None)
 
 
-def recent_measurement(measurement: dict | None, now: datetime, hours: int = 24) -> bool:
-    measured = parse_time(measurement["measured_at"]) if measurement else None
+def measured_at_for(measurement: dict, field: str | None = None) -> str | None:
+    if field:
+        return measurement.get("field_measured_at", {}).get(field, measurement["measured_at"])
+    return measurement.get("care_measured_at", measurement["measured_at"])
+
+
+def recent_measurement(measurement: dict | None, now: datetime, hours: int = 24,
+                       field: str | None = None) -> bool:
+    measured = parse_time(measured_at_for(measurement, field)) if measurement else None
     return bool(measured and timedelta(0) <= now - measured <= timedelta(hours=hours))
 
 
-def _balance_step(measurement: dict, volume_liters: float) -> dict | None:
+def _balance_step(measurement: dict, volume_liters: float, now: datetime) -> dict | None:
     scale = volume_liters / 1000
     ta = measurement["alkalinity_mg_l"]
     ph = measurement["ph"]
-    if ta is None:
+    if ta is None or not recent_measurement(measurement, now, field="alkalinity_mg_l"):
         return message("measure", "Mål alkalinitet", "Registrer alkalinitet før pH justeres.")
     if ta < 80:
         # Label: 4 x 15 ml raises about 30 mg/L per 1000 L. Start with at most one label step.
@@ -91,7 +98,7 @@ def _balance_step(measurement: dict, volume_liters: float) -> dict | None:
                     SPACARE_ALKA_DOWN,
                     "Løs opp i en plastbøtte. Pumpen skal være av i 1 time. Start deretter sirkulasjon; mål på nytt etter 2 timer.",
                     estimated=True, balance=True)
-    if ph is None:
+    if ph is None or not recent_measurement(measurement, now, field="ph"):
         return message("measure", "Mål pH", "Registrer pH etter at alkaliniteten er kontrollert.")
     if ph < 7.0:
         amount = min(7.0 - ph, 0.2) / 0.2 * 10 * scale
@@ -111,7 +118,7 @@ def recommendation(flow: dict | None, settings: dict, measurement: dict | None,
     if not volume:
         return message("setup", "Angi bassengvolum", "Legg inn antall liter før vi beregner doser.")
     if not flow:
-        if not measurement:
+        if not measurement or not measured_at_for(measurement):
             return message("measure", "Ny måling trengs", "Registrer pH, alkalinitet og klor for å starte.")
         return message("choose", "Velg en rutine", "Velg det du skal gjøre med badet i dag.")
 
@@ -121,7 +128,8 @@ def recommendation(flow: dict | None, settings: dict, measurement: dict | None,
         return message("choose", "Velg en rutine", "Velg det du skal gjøre med badet i dag.")
 
     if kind == "holiday" and step == 0 and (
-            not measurement or parse_time(measurement["measured_at"]) <= parse_time(flow["created_at"])):
+            not measurement or not measured_at_for(measurement) or
+            parse_time(measured_at_for(measurement)) <= parse_time(flow["created_at"])):
         return message("measure", "Mål vannet før ferie", "Registrer nye teststripsverdier før du kontrollerer filteret.")
 
     # Sundance asks for a measurement before adding water-care products.
@@ -151,9 +159,11 @@ def recommendation(flow: dict | None, settings: dict, measurement: dict | None,
                 until = parse_time(correction["added_at"]) + timedelta(hours=2)
                 if now < until:
                     return message("wait", "Vent før ny måling", "Mål alkalinitet og pH på nytt etter 2 timer.", until=iso_time(until))
-                if parse_time(measurement["measured_at"]) < until:
+                correction_field = "alkalinity_mg_l" if correction["product"].startswith("alka_") else "ph"
+                measured_at = parse_time(measured_at_for(measurement, correction_field))
+                if not measured_at or measured_at < until:
                     return message("measure", "Mål vannet på nytt", "Registrer nye verdier før neste dose.")
-            balance = _balance_step(measurement, volume)
+            balance = _balance_step(measurement, volume, now)
             if balance:
                 return balance
             return dose("mini_chlor", 30, "Ukentlig dose: 2 Sundance-måleskjeer à 15 ml.")
@@ -194,8 +204,8 @@ def recommendation(flow: dict | None, settings: dict, measurement: dict | None,
         return_date = date.fromisoformat(flow["meta"]["return_date"])
         if now.astimezone().date() >= return_date:
             if (recent_measurement(measurement, now) and
-                    parse_time(measurement["measured_at"]) > parse_time(flow["updated_at"]) and
-                    parse_time(measurement["measured_at"]).astimezone().date() >= return_date):
+                    parse_time(measured_at_for(measurement)) > parse_time(flow["updated_at"]) and
+                    parse_time(measured_at_for(measurement)).astimezone().date() >= return_date):
                 return message("return", "Velkommen hjem", "Ny måling er registrert. Avslutt feriemodus.")
             return message("measure", "Velkommen hjem", "Mål vannet på nytt før feriemodus avsluttes.")
         return message("away", "Feriemodus på", "Mål vannet på nytt når du kommer hjem.")

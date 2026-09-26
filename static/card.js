@@ -7,6 +7,7 @@ function renderCard() {
   document.querySelector('#card-ph').textContent = number(readings.ph, 2);
   document.querySelector('#card-ta').textContent = readings.alkalinity_mg_l == null ? '—' : `${number(readings.alkalinity_mg_l, 0)} mg/L`;
   document.querySelector('#card-chlorine').textContent = readings.chlorine_mg_l == null ? '—' : `${number(readings.chlorine_mg_l, 2)} mg/L`;
+  document.querySelector('#card-oxygen').textContent = readings.active_oxygen_mg_l == null ? '—' : `${number(readings.active_oxygen_mg_l, 2)} mg/L`;
   const status = document.querySelector('#card-status');
   status.textContent = readings.measured_at ? new Intl.DateTimeFormat('nb-NO', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(readings.measured_at)) : 'Ny måling trengs';
   status.classList.toggle('has-measurement', Boolean(readings.measured_at));

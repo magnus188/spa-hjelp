@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
+from itertools import chain
 from pathlib import Path
 from typing import Iterator
 
@@ -45,6 +46,7 @@ def init_db(path: str) -> None:
               ph REAL,
               alkalinity_mg_l REAL,
               chlorine_mg_l REAL,
+              active_oxygen_mg_l REAL,
               source TEXT NOT NULL CHECK (source IN ('manual', 'labcom'))
             );
             CREATE TABLE IF NOT EXISTS flows (
@@ -66,6 +68,9 @@ def init_db(path: str) -> None:
               added_at TEXT NOT NULL
             );
         """)
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(measurements)")}
+        if "active_oxygen_mg_l" not in columns:
+            db.execute("ALTER TABLE measurements ADD COLUMN active_oxygen_mg_l REAL")
         db.execute("INSERT OR IGNORE INTO settings (id, volume_liters, scoops_json) VALUES (1, NULL, ?)",
                    (json.dumps({key: item["default_scoop_ml"] for key, item in PRODUCTS.items()}),))
 
@@ -81,16 +86,35 @@ def save_settings(db: sqlite3.Connection, volume_liters: float, scoops: dict) ->
 
 
 def latest_measurement(db: sqlite3.Connection) -> dict | None:
-    row = db.execute("SELECT * FROM measurements ORDER BY measured_at DESC, id DESC LIMIT 1").fetchone()
-    return dict(row) if row else None
+    fields = ("ph", "alkalinity_mg_l", "chlorine_mg_l", "active_oxygen_mg_l")
+    rows = db.execute("SELECT * FROM measurements ORDER BY measured_at DESC, id DESC")
+    first = rows.fetchone()
+    if not first:
+        return None
+    result = dict(first)
+    field_measured_at = {field: None for field in fields}
+    for row in chain((first,), rows):
+        for field in fields:
+            if field_measured_at[field] is None and row[field] is not None:
+                result[field] = row[field]
+                field_measured_at[field] = row["measured_at"]
+        if all(field_measured_at.values()):
+            break
+    result["field_measured_at"] = field_measured_at
+    result["care_measured_at"] = max(
+        (field_measured_at[field] for field in fields[:3] if field_measured_at[field]),
+        default=None,
+    )
+    return result
 
 
 def save_measurement(db: sqlite3.Connection, values: dict) -> None:
     db.execute("""INSERT INTO measurements
-                  (measured_at, ph, alkalinity_mg_l, chlorine_mg_l, source)
-                  VALUES (?, ?, ?, ?, ?)""",
+                  (measured_at, ph, alkalinity_mg_l, chlorine_mg_l, active_oxygen_mg_l, source)
+                  VALUES (?, ?, ?, ?, ?, ?)""",
                (stamp(), values.get("ph"), values.get("alkalinity_mg_l"),
-                values.get("chlorine_mg_l"), values.get("source", "manual")))
+                values.get("chlorine_mg_l"), values.get("active_oxygen_mg_l"),
+                values.get("source", "manual")))
 
 
 def latest_additions(db: sqlite3.Connection, limit: int = 20) -> list[dict]:
