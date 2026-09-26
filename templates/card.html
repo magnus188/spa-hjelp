@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="nb">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0e1b27">
+  <title>Spa-oversikt</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='card.js') }}" defer></script>
+</head>
+<body class="card-body">
+  <main class="ha-spa-card" data-spa-url="{{ spa_url }}">
+    <div class="card-heading"><span class="icon icon-hot-tub" aria-hidden="true"></span><h1>Spa</h1></div>
+    <p class="card-label">Sist målt</p>
+    <p id="card-status" class="card-status">Ny måling trengs</p>
+    <div id="card-cover" class="card-cover" hidden><span class="icon icon-timer" aria-hidden="true"></span><span>Hold lokket åpent<br><strong id="card-timer">20:00</strong></span></div>
+    <div class="card-readings">
+      <div><span>pH</span><strong id="card-ph">—</strong></div>
+      <div><span>Alkalinitet</span><strong id="card-ta">—</strong></div>
+      <div><span>Klor</span><strong id="card-chlorine">—</strong></div>
+    </div>
+    <div class="card-footer"><p>Sist tilsatt <strong id="card-last">—</strong></p><a id="card-open" href="{{ spa_url }}" target="_top">Åpne Spa <span class="icon icon-chevron" aria-hidden="true"></span></a></div>
+  </main>
+</body>
+</html>

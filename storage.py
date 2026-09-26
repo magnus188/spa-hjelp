@@ -1,0 +1,135 @@
+"""Small SQLite store for one household spa."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Iterator
+
+from rules import PRODUCTS, utc_now
+
+
+def stamp() -> str:
+    return utc_now().isoformat(timespec="microseconds")
+
+
+@contextmanager
+def connect(path: str) -> Iterator[sqlite3.Connection]:
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    try:
+        yield connection
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def init_db(path: str) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with connect(path) as db:
+        db.executescript("""
+            CREATE TABLE IF NOT EXISTS settings (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              volume_liters REAL,
+              scoops_json TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS measurements (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              measured_at TEXT NOT NULL,
+              ph REAL,
+              alkalinity_mg_l REAL,
+              chlorine_mg_l REAL,
+              source TEXT NOT NULL CHECK (source IN ('manual', 'labcom'))
+            );
+            CREATE TABLE IF NOT EXISTS flows (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              kind TEXT NOT NULL,
+              step INTEGER NOT NULL DEFAULT 0,
+              meta_json TEXT NOT NULL DEFAULT '{}',
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              completed_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS additions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              product TEXT NOT NULL,
+              amount_ml REAL NOT NULL,
+              scoop_ml REAL NOT NULL,
+              context TEXT NOT NULL,
+              flow_id INTEGER REFERENCES flows(id),
+              added_at TEXT NOT NULL
+            );
+        """)
+        db.execute("INSERT OR IGNORE INTO settings (id, volume_liters, scoops_json) VALUES (1, NULL, ?)",
+                   (json.dumps({key: item["default_scoop_ml"] for key, item in PRODUCTS.items()}),))
+
+
+def get_settings(db: sqlite3.Connection) -> dict:
+    row = db.execute("SELECT volume_liters, scoops_json FROM settings WHERE id = 1").fetchone()
+    return {"volume_liters": row["volume_liters"], "scoops": json.loads(row["scoops_json"])}
+
+
+def save_settings(db: sqlite3.Connection, volume_liters: float, scoops: dict) -> None:
+    db.execute("UPDATE settings SET volume_liters = ?, scoops_json = ? WHERE id = 1",
+               (volume_liters, json.dumps(scoops)))
+
+
+def latest_measurement(db: sqlite3.Connection) -> dict | None:
+    row = db.execute("SELECT * FROM measurements ORDER BY measured_at DESC, id DESC LIMIT 1").fetchone()
+    return dict(row) if row else None
+
+
+def save_measurement(db: sqlite3.Connection, values: dict) -> None:
+    db.execute("""INSERT INTO measurements
+                  (measured_at, ph, alkalinity_mg_l, chlorine_mg_l, source)
+                  VALUES (?, ?, ?, ?, ?)""",
+               (stamp(), values.get("ph"), values.get("alkalinity_mg_l"),
+                values.get("chlorine_mg_l"), values.get("source", "manual")))
+
+
+def latest_additions(db: sqlite3.Connection, limit: int = 20) -> list[dict]:
+    rows = db.execute("SELECT * FROM additions ORDER BY added_at DESC, id DESC LIMIT ?", (limit,)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def save_addition(db: sqlite3.Connection, product: str, amount_ml: float,
+                  scoop_ml: float, context: str, flow_id: int | None) -> None:
+    db.execute("""INSERT INTO additions
+                  (product, amount_ml, scoop_ml, context, flow_id, added_at)
+                  VALUES (?, ?, ?, ?, ?, ?)""",
+               (product, amount_ml, scoop_ml, context, flow_id, stamp()))
+
+
+def _flow(row: sqlite3.Row | None) -> dict | None:
+    if not row:
+        return None
+    value = dict(row)
+    value["meta"] = json.loads(value.pop("meta_json"))
+    return value
+
+
+def active_flow(db: sqlite3.Connection) -> dict | None:
+    row = db.execute("SELECT * FROM flows WHERE completed_at IS NULL ORDER BY id DESC LIMIT 1").fetchone()
+    return _flow(row)
+
+
+def start_flow(db: sqlite3.Connection, kind: str, meta: dict) -> None:
+    now = stamp()
+    db.execute("UPDATE flows SET completed_at = ?, updated_at = ? WHERE completed_at IS NULL", (now, now))
+    db.execute("""INSERT INTO flows (kind, step, meta_json, created_at, updated_at)
+                  VALUES (?, 0, ?, ?, ?)""", (kind, json.dumps(meta), now, now))
+
+
+def advance_flow(db: sqlite3.Connection, flow_id: int) -> None:
+    db.execute("UPDATE flows SET step = step + 1, updated_at = ? WHERE id = ?", (stamp(), flow_id))
+
+
+def finish_flow(db: sqlite3.Connection, flow_id: int) -> None:
+    now = stamp()
+    db.execute("UPDATE flows SET completed_at = ?, updated_at = ? WHERE id = ?", (now, now, flow_id))
