@@ -23,6 +23,23 @@ Appen styrer ikke badets pumper eller temperatur. Den avgjør heller ikke om
 vannet er klart for bading.
 O₂-verdien loggføres, men brukes foreløpig ikke til å beregne en dose.
 
+## Bruk rett i nettleseren
+
+[GitHub Pages-utgaven](https://magnus188.github.io/spa-hjelp/) har samme
+skjema, rutiner, doseberegninger og lokk-timer uten server. Målinger,
+innstillinger og tilsetninger lagres bare i nettleseren du bruker. De deles
+ikke med hjemmeserverens SQLite-database, Home Assistant eller PoolLab, og kan
+forsvinne hvis nettleserdata slettes.
+
+De statiske filene i `docs/` bygges fra Flask-malen og appens produktliste med:
+
+```bash
+python3 scripts/build_pages.py
+node tests/pages-api.test.mjs
+```
+
+GitHub Pages publiserer `docs/` fra `main`.
+
 ## Start lokalt
 
 Krever Python 3.12 eller nyere.
