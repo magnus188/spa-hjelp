@@ -120,6 +120,10 @@ def recommendation(flow: dict | None, settings: dict, measurement: dict | None,
     if kind not in MODES:
         return message("choose", "Velg en rutine", "Velg det du skal gjøre med badet i dag.")
 
+    if kind == "holiday" and step == 0 and (
+            not measurement or parse_time(measurement["measured_at"]) <= parse_time(flow["created_at"])):
+        return message("measure", "Mål vannet før ferie", "Registrer nye teststripsverdier før du kontrollerer filteret.")
+
     # Sundance asks for a measurement before adding water-care products.
     if not recent_measurement(measurement, now) and not (kind == "holiday" and step >= 4):
         return message("measure", "Ny måling trengs", "Mål vannet før du tilsetter kjemikalier.")

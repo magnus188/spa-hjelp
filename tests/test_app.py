@@ -59,6 +59,9 @@ class AppTests(unittest.TestCase):
             "kind": "holiday", "departure_date": date.today().isoformat(),
             "return_date": (date.today() + timedelta(days=7)).isoformat(),
         })
+        self.assertEqual(self.client.get("/api/summary").json["next_step"]["type"], "measure")
+        self.client.post("/api/measurements", json={"ph": 7.2, "alkalinity_mg_l": 100,
+                                                     "chlorine_mg_l": 0.2})
         self.assertEqual(self.client.get("/api/summary").json["next_step"]["type"], "check")
         self.client.post("/api/confirm", json={})  # filter
         self.client.post("/api/confirm", json={})  # MiniChlor

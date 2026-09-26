@@ -31,7 +31,7 @@ No actionable P0, P1, or P2 differences remain. The page keeps the three-card hi
 
 ## Interaction and responsive checks
 
-- Browser flow: settings, new measurement, +0.2 mg/L chlorine estimate and warning, chemical confirmation, timer, history, weekly routine, and holiday filter/MiniChlor/five-minute wait.
+- Browser flow: settings, new measurement, +0.2 mg/L chlorine estimate and warning, chemical confirmation, timer, history, weekly routine, and holiday filter/MiniChlor/five-minute wait. The final holiday routine also prompts for a fresh measurement when started; this transition is covered by the automated browser-independent test.
 - 1000 × 800 and 390 × 844 CSS viewports: no horizontal overflow; primary controls remain reachable.
 - Browser console: no warnings or errors in the tested views.
 - A running Home Assistant instance and a physical 10-inch device were not available; the browser viewport checks cover the app layout, not the Home Assistant shell.
