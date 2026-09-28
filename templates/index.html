@@ -27,7 +27,7 @@
 
     <div class="top-grid">
       <section class="panel water-panel" aria-labelledby="water-heading">
-        <h2 id="water-heading" class="panel-title"><span class="icon icon-water" aria-hidden="true"></span>Vannet nå</h2>
+        <h2 id="water-heading" class="panel-title"><span class="icon icon-water" aria-hidden="true"></span>Siste vurdering</h2>
         <div class="reading-list">
           <div class="reading-row"><span class="icon icon-water reading-icon" aria-hidden="true"></span><span>pH</span><strong id="ph-value">—</strong><span id="ph-meta" class="reading-meta">Ikke målt</span></div>
           <div class="reading-row"><span class="icon icon-waves reading-icon" aria-hidden="true"></span><span>Alkalinitet</span><strong id="alkalinity-value">—</strong><span id="alkalinity-meta" class="reading-meta">Ikke målt</span></div>
@@ -61,18 +61,18 @@
     </section>
 
     <nav class="mode-grid" aria-label="Vannpleierutiner">
-      <button type="button" data-mode="weekly" class="mode-button"><span class="icon icon-calendar" aria-hidden="true"></span>Ukentlig</button>
-      <button type="button" data-mode="before_bath" class="mode-button"><span class="icon icon-person" aria-hidden="true"></span>Før bad</button>
+      <button type="button" data-mode="before_bath" class="mode-button mode-primary"><span class="icon icon-person" aria-hidden="true"></span>Bade nå</button>
+      <button type="button" data-mode="holiday" class="mode-button mode-primary"><span class="icon icon-calendar" aria-hidden="true"></span>Ferie</button>
       <button type="button" data-mode="after_bath" class="mode-button"><span class="icon icon-hot-tub" aria-hidden="true"></span>Etter bad</button>
       <button type="button" data-mode="new_water" class="mode-button"><span class="icon icon-water" aria-hidden="true"></span>Nytt vann</button>
-      <button type="button" data-mode="holiday" class="mode-button"><span class="icon icon-calendar" aria-hidden="true"></span>Ferie</button>
+      <button type="button" data-mode="weekly" class="mode-button"><span class="icon icon-calendar" aria-hidden="true"></span>Ukentlig</button>
     </nav>
 
-    <p class="care-order"><strong>Rekkefølge ved justering:</strong> Alkalinitet → pH → MiniChlor → 20 min med pumpe 1 → Active Oxygen før bad. Mål på nytt mellom trinnene. Bare valgte produkter blir foreslått.</p>
+    <p class="care-order"><strong>Rekkefølge:</strong> Juster alkalinitet, så pH, og mål på nytt etter 2 timer. Ved ønsket klorøkning viser vi et estimat og ber om ny måling før Active Oxygen. Sundance anbefaler Active Oxygen før bad og MiniChlor etter bad eller ukentlig.</p>
 
     <div class="lower-grid">
       <section class="panel utility-panel">
-        <div><h2>Juster verdier</h2><p>Velg ønsket økning for alkalinitet, pH, klor og O₂. Veiviseren viser ett produkt om gangen.</p></div>
+        <div><h2>Finjustering fra måler</h2><p>Har du nøyaktige målerverdier, kan du velge en bestemt økning. Med teststrips gjør du dette i Ny måling.</p></div>
         <button id="adjust-open" class="button button-secondary" type="button">Velg økning <span class="icon icon-chevron" aria-hidden="true"></span></button>
       </section>
       <section class="panel utility-panel">
@@ -85,12 +85,24 @@
   <dialog id="measurement-dialog" class="app-dialog">
     <form id="measurement-form" class="dialog-form">
       <div class="dialog-head"><h2>Ny måling</h2><button type="button" class="dialog-close" aria-label="Lukk"><span class="icon icon-close" aria-hidden="true"></span></button></div>
-      <p>Fyll inn verdiene du har målt. La felt stå tomt hvis du ikke har målt dem.</p>
-      <label>pH <input name="ph" type="number" min="0" max="14" step="0.1" inputmode="decimal" placeholder="f.eks. 7,2"></label>
-      <label>Alkalinitet (mg/L) <input name="alkalinity_mg_l" type="number" min="0" max="500" step="1" inputmode="decimal" placeholder="f.eks. 100"></label>
-      <label>Fritt klor (mg/L) <input name="chlorine_mg_l" type="number" min="0" max="20" step="0.1" inputmode="decimal" placeholder="f.eks. 0,2"></label>
-      <label>O₂ / aktivt oksygen (mg/L) <input name="active_oxygen_mg_l" type="number" min="0" max="50" step="0.1" inputmode="decimal" placeholder="f.eks. 5"></label>
-      <button type="submit" class="button button-primary">Lagre måling</button>
+      <fieldset class="method-choice"><legend>Hvordan målte du?</legend>
+        <label><input type="radio" name="method" value="strip" checked> Teststrips</label>
+        <label><input type="radio" name="method" value="machine"> Måler</label>
+      </fieldset>
+      <div id="strip-fields" class="measurement-fields">
+        <p>Velg hvor mye hver verdi bør endres ut fra fargene på stripsen. <strong>+ øke · − senke · 0 ingen endring.</strong> Dette er ikke eksakte målinger.</p>
+        <label>Alkalinitet, ønsket endring (mg/L)<input name="strip_alkalinity_mg_l" type="number" min="-100" max="100" step="1" inputmode="decimal" value="0" required><small>For eksempel +10 hvis den virker for lav.</small></label>
+        <label>pH, ønsket endring<input name="strip_ph" type="number" min="-1" max="1" step="0.1" inputmode="decimal" value="0" required><small>For eksempel −0,2 hvis den virker for høy.</small></label>
+        <label>Klor, ønsket endring (mg/L)<input name="strip_chlorine_mg_l" type="number" min="-3" max="3" step="0.1" inputmode="decimal" value="0" required><small>For eksempel +0,2. Velg minus hvis klor er for høyt.</small></label>
+        <label>O₂, ønsket endring (mg/L)<input name="strip_active_oxygen_mg_l" type="number" min="-10" max="10" step="0.1" inputmode="decimal" value="0" required><small>Ønsket O₂-økning kan ikke regnes direkte om til skjeer.</small></label>
+      </div>
+      <div id="machine-fields" class="measurement-fields" hidden>
+        <p>Skriv inn de nøyaktige verdiene fra måleren. Den måler klor, alkalinitet og pH, men ikke O₂.</p>
+        <label>Alkalinitet (mg/L)<input name="alkalinity_mg_l" type="number" min="0" max="500" step="1" inputmode="decimal" placeholder="f.eks. 100"></label>
+        <label>pH<input name="ph" type="number" min="0" max="14" step="0.1" inputmode="decimal" placeholder="f.eks. 7,2"></label>
+        <label>Fritt klor (mg/L)<input name="chlorine_mg_l" type="number" min="0" max="20" step="0.1" inputmode="decimal" placeholder="f.eks. 0,2"></label>
+      </div>
+      <button type="submit" class="button button-primary">Lagre vurdering</button>
     </form>
   </dialog>
 
@@ -107,7 +119,7 @@
 
   <dialog id="bathers-dialog" class="app-dialog small-dialog">
     <form id="bathers-form" class="dialog-form">
-      <div class="dialog-head"><h2>Før bad</h2><button type="button" class="dialog-close" aria-label="Lukk"><span class="icon icon-close" aria-hidden="true"></span></button></div>
+      <div class="dialog-head"><h2>Bade nå</h2><button type="button" class="dialog-close" aria-label="Lukk"><span class="icon icon-close" aria-hidden="true"></span></button></div>
       <label>Hvor mange skal bade? <input name="bathers" type="number" min="1" max="20" step="1" value="1" required></label>
       <button type="submit" class="button button-primary">Vis neste steg</button>
     </form>

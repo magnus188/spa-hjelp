@@ -50,19 +50,28 @@ async function refresh() {
 function renderReadings() {
   const measurement = state.measurements;
   const fields = [
-    ['ph', measurement.ph, '', 2],
-    ['alkalinity', measurement.alkalinity_mg_l, ' mg/L', 0],
-    ['chlorine', measurement.chlorine_mg_l, ' mg/L', 2],
-    ['oxygen', measurement.active_oxygen_mg_l, ' mg/L', 2],
+    ['ph', 'ph', '', 2],
+    ['alkalinity', 'alkalinity_mg_l', ' mg/L', 0],
+    ['chlorine', 'chlorine_mg_l', ' mg/L', 2],
+    ['oxygen', 'active_oxygen_mg_l', ' mg/L', 2],
   ];
-  for (const [key, value, unit, digits] of fields) {
-    $(`#${key}-value`).textContent = value == null ? '—' : `${fmt(value, digits)}${unit}`;
-    const fieldName = { alkalinity: 'alkalinity_mg_l', chlorine: 'chlorine_mg_l', oxygen: 'active_oxygen_mg_l' }[key] || key;
-    const measuredAt = measurement.field_measured_at?.[fieldName];
-    $(`#${key}-meta`).textContent = value == null ? 'Ikke målt' :
-      measuredAt && measuredAt !== measurement.measured_at ? shortDate(measuredAt) : '';
+  for (const [key, field, unit, digits] of fields) {
+    const value = measurement[field];
+    const change = measurement.adjustments?.[field];
+    const measuredAt = measurement.field_measured_at?.[field];
+    const method = measurement.field_method?.[field];
+    if (change != null) {
+      $(`#${key}-value`).textContent = `${change > 0 ? '+' : change < 0 ? '−' : ''}${fmt(Math.abs(change), digits)}${unit}`;
+      $(`#${key}-meta`).textContent = `Ønsket endring${measuredAt !== measurement.measured_at ? ` · ${shortDate(measuredAt)}` : ''}`;
+    } else {
+      $(`#${key}-value`).textContent = value == null ? '—' : `${fmt(value, digits)}${unit}`;
+      $(`#${key}-meta`).textContent = value == null ? 'Ikke vurdert' :
+        `${method === 'machine' ? 'Måler' : 'Målt'}${measuredAt !== measurement.measured_at ? ` · ${shortDate(measuredAt)}` : ''}`;
+    }
   }
-  $('#last-measured').textContent = `Sist målt: ${localDate(measurement.measured_at)} · ${fmt(state.volume_liters, 0)} L`;
+  const source = measurement.method === 'strip' ? 'teststrips' : measurement.method === 'machine' ? 'måler' : 'manuelt';
+  $('#last-measured').textContent = `Sist vurdert: ${localDate(measurement.measured_at)}${measurement.measured_at ? ` · ${source}` : ''} · ${fmt(state.volume_liters, 0)} L`;
+  $('#adjust-open').disabled = !['machine', 'legacy'].includes(measurement.method);
 }
 
 function renderHistory() {
@@ -140,7 +149,18 @@ function openDialog(selector) { $(selector).showModal(); }
 function closeDialog(dialog) { dialog.close(); }
 function numberOrNull(value) { return value.trim() === '' ? null : Number(value.replace(',', '.')); }
 
+function updateMeasurementMethod() {
+  const form = $('#measurement-form');
+  const strip = form.elements.method.value === 'strip';
+  $('#strip-fields').hidden = !strip;
+  $('#machine-fields').hidden = strip;
+  $('#strip-fields').querySelectorAll('input').forEach((input) => { input.disabled = !strip; });
+  $('#machine-fields').querySelectorAll('input').forEach((input) => { input.disabled = strip; });
+}
+
 $('#new-measurement').addEventListener('click', () => openDialog('#measurement-dialog'));
+document.querySelectorAll('[name="method"]').forEach((radio) => radio.addEventListener('change', updateMeasurementMethod));
+updateMeasurementMethod();
 $('#settings-open').addEventListener('click', () => openSettings());
 $('#history-open').addEventListener('click', async () => {
   try {
@@ -170,8 +190,15 @@ document.querySelectorAll('dialog').forEach((dialog) => dialog.addEventListener(
 $('#measurement-form').addEventListener('submit', (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const body = Object.fromEntries(['ph', 'alkalinity_mg_l', 'chlorine_mg_l', 'active_oxygen_mg_l'].map((key) => [key, numberOrNull(form.elements[key].value)]));
-  run(async () => { await api('/api/measurements', body); form.reset(); closeDialog($('#measurement-dialog')); }, 'Målingen er lagret.');
+  const method = form.elements.method.value;
+  const fields = ['ph', 'alkalinity_mg_l', 'chlorine_mg_l', 'active_oxygen_mg_l'];
+  const body = method === 'strip' ? {
+    method, adjustments: Object.fromEntries(fields.map((key) => [key, numberOrNull(form.elements[`strip_${key}`].value)])),
+  } : {
+    method, ...Object.fromEntries(fields.filter((key) => key !== 'active_oxygen_mg_l')
+      .map((key) => [key, numberOrNull(form.elements[key].value)])),
+  };
+  run(async () => { await api('/api/measurements', body); form.reset(); updateMeasurementMethod(); closeDialog($('#measurement-dialog')); }, 'Vurderingen er lagret. Velg hva du vil gjøre.');
 });
 
 function openSettings() {
@@ -204,7 +231,7 @@ document.querySelectorAll('[data-mode]').forEach((button) => button.addEventList
 $('#bathers-form').addEventListener('submit', (event) => {
   event.preventDefault();
   const bathers = Number(event.currentTarget.elements.bathers.value);
-  run(async () => { await api('/api/flows', { kind: 'before_bath', bathers }); closeDialog($('#bathers-dialog')); }, 'Før bad er valgt.');
+  run(async () => { await api('/api/flows', { kind: 'before_bath', bathers }); closeDialog($('#bathers-dialog')); }, 'Bade nå er valgt.');
 });
 
 $('#holiday-form').addEventListener('submit', (event) => {

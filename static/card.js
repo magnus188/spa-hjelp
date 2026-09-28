@@ -1,15 +1,21 @@
 let cardState = null;
 const number = (value, digits = 1) => value == null ? '—' : new Intl.NumberFormat('nb-NO', { maximumFractionDigits: digits }).format(value);
+const reading = (readings, field, digits, unit = '') => {
+  const change = readings.adjustments?.[field];
+  if (change != null) return `${change > 0 ? '+' : change < 0 ? '−' : ''}${number(Math.abs(change), digits)}${unit}`;
+  return readings[field] == null ? '—' : `${number(readings[field], digits)}${unit}`;
+};
 
 function renderCard() {
   if (!cardState) return;
   const readings = cardState.measurements;
-  document.querySelector('#card-ph').textContent = number(readings.ph, 2);
-  document.querySelector('#card-ta').textContent = readings.alkalinity_mg_l == null ? '—' : `${number(readings.alkalinity_mg_l, 0)} mg/L`;
-  document.querySelector('#card-chlorine').textContent = readings.chlorine_mg_l == null ? '—' : `${number(readings.chlorine_mg_l, 2)} mg/L`;
-  document.querySelector('#card-oxygen').textContent = readings.active_oxygen_mg_l == null ? '—' : `${number(readings.active_oxygen_mg_l, 2)} mg/L`;
+  document.querySelector('#card-ph').textContent = reading(readings, 'ph', 2);
+  document.querySelector('#card-ta').textContent = reading(readings, 'alkalinity_mg_l', 0, ' mg/L');
+  document.querySelector('#card-chlorine').textContent = reading(readings, 'chlorine_mg_l', 2, ' mg/L');
+  document.querySelector('#card-oxygen').textContent = reading(readings, 'active_oxygen_mg_l', 2, ' mg/L');
   const status = document.querySelector('#card-status');
-  status.textContent = readings.measured_at ? new Intl.DateTimeFormat('nb-NO', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(readings.measured_at)) : 'Ny måling trengs';
+  status.textContent = readings.measured_at ?
+    `${readings.method === 'strip' ? 'Ønsket endring · ' : ''}${new Intl.DateTimeFormat('nb-NO', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(readings.measured_at))}` : 'Ny måling trengs';
   status.classList.toggle('has-measurement', Boolean(readings.measured_at));
   document.querySelector('#card-last').textContent = cardState.last_added ? cardState.products[cardState.last_added.product].name : '—';
   const cover = document.querySelector('#card-cover');

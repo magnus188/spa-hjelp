@@ -38,7 +38,8 @@ def init_db(path: str) -> None:
             CREATE TABLE IF NOT EXISTS settings (
               id INTEGER PRIMARY KEY CHECK (id = 1),
               volume_liters REAL,
-              scoops_json TEXT NOT NULL
+              scoops_json TEXT NOT NULL,
+              water_changed_at TEXT
             );
             CREATE TABLE IF NOT EXISTS measurements (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,6 +48,8 @@ def init_db(path: str) -> None:
               alkalinity_mg_l REAL,
               chlorine_mg_l REAL,
               active_oxygen_mg_l REAL,
+              method TEXT NOT NULL DEFAULT 'legacy',
+              adjustments_json TEXT,
               source TEXT NOT NULL CHECK (source IN ('manual', 'labcom'))
             );
             CREATE TABLE IF NOT EXISTS flows (
@@ -71,6 +74,13 @@ def init_db(path: str) -> None:
         columns = {row["name"] for row in db.execute("PRAGMA table_info(measurements)")}
         if "active_oxygen_mg_l" not in columns:
             db.execute("ALTER TABLE measurements ADD COLUMN active_oxygen_mg_l REAL")
+        if "method" not in columns:
+            db.execute("ALTER TABLE measurements ADD COLUMN method TEXT NOT NULL DEFAULT 'legacy'")
+        if "adjustments_json" not in columns:
+            db.execute("ALTER TABLE measurements ADD COLUMN adjustments_json TEXT")
+        settings_columns = {row["name"] for row in db.execute("PRAGMA table_info(settings)")}
+        if "water_changed_at" not in settings_columns:
+            db.execute("ALTER TABLE settings ADD COLUMN water_changed_at TEXT")
         db.execute("INSERT OR IGNORE INTO settings (id, volume_liters, scoops_json) VALUES (1, 1500, ?)",
                    (json.dumps({key: item["default_scoop_ml"] for key, item in PRODUCTS.items()}),))
         db.execute("UPDATE settings SET volume_liters = 1500 WHERE id = 1 AND volume_liters IS NULL")
@@ -88,20 +98,29 @@ def save_settings(db: sqlite3.Connection, volume_liters: float, scoops: dict) ->
 
 def latest_measurement(db: sqlite3.Connection) -> dict | None:
     fields = ("ph", "alkalinity_mg_l", "chlorine_mg_l", "active_oxygen_mg_l")
-    rows = db.execute("SELECT * FROM measurements ORDER BY measured_at DESC, id DESC")
+    water_changed_at = db.execute("SELECT water_changed_at FROM settings WHERE id = 1").fetchone()[0]
+    rows = db.execute("SELECT * FROM measurements WHERE ? IS NULL OR measured_at > ? ORDER BY measured_at DESC, id DESC",
+                      (water_changed_at, water_changed_at))
     first = rows.fetchone()
     if not first:
         return None
     result = dict(first)
     field_measured_at = {field: None for field in fields}
+    adjustments = {field: None for field in fields}
+    field_method = {field: None for field in fields}
     for row in chain((first,), rows):
+        strip = json.loads(row["adjustments_json"] or "{}")
         for field in fields:
-            if field_measured_at[field] is None and row[field] is not None:
+            if field_measured_at[field] is None and (row[field] is not None or field in strip):
                 result[field] = row[field]
+                adjustments[field] = strip.get(field)
                 field_measured_at[field] = row["measured_at"]
+                field_method[field] = row["method"]
         if all(field_measured_at.values()):
             break
     result["field_measured_at"] = field_measured_at
+    result["adjustments"] = adjustments
+    result["field_method"] = field_method
     result["care_measured_at"] = max(
         (field_measured_at[field] for field in fields[:3] if field_measured_at[field]),
         default=None,
@@ -111,10 +130,12 @@ def latest_measurement(db: sqlite3.Connection) -> dict | None:
 
 def save_measurement(db: sqlite3.Connection, values: dict) -> None:
     db.execute("""INSERT INTO measurements
-                  (measured_at, ph, alkalinity_mg_l, chlorine_mg_l, active_oxygen_mg_l, source)
-                  VALUES (?, ?, ?, ?, ?, ?)""",
+                  (measured_at, ph, alkalinity_mg_l, chlorine_mg_l, active_oxygen_mg_l,
+                   method, adjustments_json, source)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                (stamp(), values.get("ph"), values.get("alkalinity_mg_l"),
                 values.get("chlorine_mg_l"), values.get("active_oxygen_mg_l"),
+                values.get("method", "legacy"), json.dumps(values.get("adjustments")) if values.get("adjustments") is not None else None,
                 values.get("source", "manual")))
 
 
@@ -146,6 +167,8 @@ def active_flow(db: sqlite3.Connection) -> dict | None:
 
 def start_flow(db: sqlite3.Connection, kind: str, meta: dict) -> None:
     now = stamp()
+    if kind == "new_water":
+        db.execute("UPDATE settings SET water_changed_at = ? WHERE id = 1", (now,))
     db.execute("UPDATE flows SET completed_at = ?, updated_at = ? WHERE completed_at IS NULL", (now, now))
     db.execute("""INSERT INTO flows (kind, step, meta_json, created_at, updated_at)
                   VALUES (?, 0, ?, ?, ?)""", (kind, json.dumps(meta), now, now))

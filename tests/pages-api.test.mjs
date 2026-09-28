@@ -62,9 +62,9 @@ const localDay = (date) => [date.getFullYear(), String(date.getMonth() + 1).padS
 await api('/api/flows', {
   kind: 'holiday', departure_date: localDay(today), return_date: localDay(nextWeek),
 });
-assert.equal((await api('/api/summary')).next_step.type, 'measure');
+assert.equal((await api('/api/summary')).next_step.title, 'Kontroller filteret');
 await api('/api/measurements', { active_oxygen_mg_l: 6 });
-assert.equal((await api('/api/summary')).next_step.type, 'measure');
+assert.equal((await api('/api/summary')).next_step.title, 'Kontroller filteret');
 await api('/api/measurements', { ph: 7.2 });
 assert.equal((await api('/api/summary')).next_step.title, 'Kontroller filteret');
 await api('/api/confirm', {}); // filter
@@ -83,6 +83,8 @@ assert.equal(summary.next_step.product, 'alka_up');
 assert.equal(summary.next_step.amount_ml, 20);
 await api('/api/flows', { kind: 'new_water' });
 assert.equal((await api('/api/summary')).next_step.amount_ml, 50);
+assert.equal((await api('/api/summary')).measurements.measured_at, null);
+await api('/api/measurements', { alkalinity_mg_l: 100, ph: 7.2, chlorine_mg_l: 1.2 });
 await api('/api/flows', { kind: 'before_bath', bathers: 5 });
 assert.equal((await api('/api/summary')).next_step.amount_ml, 75);
 
@@ -104,5 +106,41 @@ saved.set('spa-hjelp-pages-v1', JSON.stringify(stored));
 await api('/api/measurements', { chlorine_mg_l: 0.4, active_oxygen_mg_l: 3 });
 assert.equal((await api('/api/summary')).next_step.product, 'active_oxygen');
 assert.equal((await api('/api/summary')).next_step.amount_ml, 45);
+
+saved.clear();
+api = client();
+await api('/api/flows', { kind: 'after_bath' });
+assert.equal((await api('/api/summary')).next_step.product, 'mini_chlor');
+await api('/api/flows', { kind: 'new_water' });
+assert.equal((await api('/api/summary')).next_step.product, 'no_scale');
+await api('/api/measurements', { method: 'strip', adjustments: {
+  ph: -0.2, alkalinity_mg_l: 10, chlorine_mg_l: 0.2, active_oxygen_mg_l: 2,
+} });
+api = client();
+summary = await api('/api/summary');
+assert.equal(summary.measurements.method, 'strip');
+assert.equal(summary.measurements.alkalinity_mg_l, null);
+assert.equal(summary.measurements.adjustments.alkalinity_mg_l, 10);
+assert.equal(summary.measurements.adjustments.active_oxygen_mg_l, 2);
+await api('/api/flows', { kind: 'before_bath' });
+assert.equal((await api('/api/summary')).next_step.product, 'alka_up');
+await assert.rejects(api('/api/measurements', { method: 'machine', ph: 7.2,
+  alkalinity_mg_l: 100, chlorine_mg_l: 4, active_oxygen_mg_l: 6 }), /ikke O₂-verdi/);
+await api('/api/measurements', { method: 'machine', ph: 7.2,
+  alkalinity_mg_l: 100, chlorine_mg_l: 4 });
+summary = await api('/api/summary');
+assert.equal(summary.next_step.title, 'For mye klor');
+assert.equal(summary.measurements.active_oxygen_mg_l, null);
+assert.equal(summary.measurements.adjustments.active_oxygen_mg_l, 2);
+
+saved.clear();
+api = client();
+await api('/api/measurements', { method: 'machine', ph: 7.2,
+  alkalinity_mg_l: 100, chlorine_mg_l: 1.2 });
+await api('/api/flows', { kind: 'before_bath' });
+assert.equal((await api('/api/summary')).next_step.product, 'active_oxygen');
+await api('/api/confirm', {});
+await api('/api/flows', { kind: 'after_bath' });
+assert.equal((await api('/api/summary')).next_step.type, 'wait');
 
 console.log('GitHub Pages API: målinger, doser, timer og ferie fungerer.');

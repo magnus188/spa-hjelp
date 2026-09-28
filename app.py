@@ -81,6 +81,9 @@ def create_app(test_config: dict | None = None) -> Flask:
                 "measured_at": measurement["measured_at"] if measurement else None,
                 "source": measurement["source"] if measurement else None,
                 "field_measured_at": measurement["field_measured_at"] if measurement else None,
+                "field_method": measurement["field_method"] if measurement else None,
+                "adjustments": measurement["adjustments"] if measurement else None,
+                "method": measurement["method"] if measurement else None,
             },
             "last_additions": additions[:3],
             "last_added": last,
@@ -118,15 +121,36 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.post("/api/measurements")
     def add_measurement():
         body = request.get_json(silent=True) or {}
-        values = {
-            "ph": _number(body.get("ph"), "pH", 0, 14, required=False),
-            "alkalinity_mg_l": _number(body.get("alkalinity_mg_l"), "Alkalinitet", 0, 500, required=False),
-            "chlorine_mg_l": _number(body.get("chlorine_mg_l"), "Klor", 0, 20, required=False),
-            "active_oxygen_mg_l": _number(body.get("active_oxygen_mg_l"), "Aktivt oksygen", 0, 50, required=False),
-            "source": "manual",
-        }
-        if all(values[key] is None for key in ("ph", "alkalinity_mg_l", "chlorine_mg_l", "active_oxygen_mg_l")):
-            raise ValueError("Legg inn minst én måleverdi.")
+        method = body.get("method", "legacy")
+        if method not in ("legacy", "strip", "machine"):
+            raise ValueError("Velg teststrips eller måler.")
+        fields = ("ph", "alkalinity_mg_l", "chlorine_mg_l", "active_oxygen_mg_l")
+        if method == "strip":
+            ranges = {
+                "ph": ("pH", -1, 1),
+                "alkalinity_mg_l": ("Alkalinitet", -100, 100),
+                "chlorine_mg_l": ("Klor", -3, 3),
+                "active_oxygen_mg_l": ("O₂", -10, 10),
+            }
+            raw = body.get("adjustments")
+            if not isinstance(raw, dict) or set(raw) != set(ranges):
+                raise ValueError("Fyll inn ønsket endring for alle fire feltene på teststrips.")
+            values = {field: None for field in fields}
+            values["adjustments"] = {field: _number(raw[field], name, low, high)
+                                     for field, (name, low, high) in ranges.items()}
+        else:
+            if method == "machine" and body.get("active_oxygen_mg_l") not in (None, ""):
+                raise ValueError("Måleren har ikke O₂-verdi. Bruk teststrips for O₂.")
+            values = {
+                "ph": _number(body.get("ph"), "pH", 0, 14, required=False),
+                "alkalinity_mg_l": _number(body.get("alkalinity_mg_l"), "Alkalinitet", 0, 500, required=False),
+                "chlorine_mg_l": _number(body.get("chlorine_mg_l"), "Klor", 0, 20, required=False),
+                "active_oxygen_mg_l": _number(body.get("active_oxygen_mg_l"), "Aktivt oksygen", 0, 50, required=False),
+            }
+            if all(values[key] is None for key in fields):
+                raise ValueError("Legg inn minst én måleverdi.")
+        values["method"] = method
+        values["source"] = "manual"
         with connect(app.config["DB_PATH"]) as db:
             save_measurement(db, values)
         return jsonify(ok=True), 201
@@ -155,7 +179,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                 limits = {
                     "alkalinity_mg_l": ("alkalinitet", 100, 120),
                     "ph": ("pH", 1, 7.4),
-                    "chlorine_mg_l": ("klor", 3, 20),
+                    "chlorine_mg_l": ("klor", 3, 3),
                     "active_oxygen_mg_l": ("O₂", 10, 10),
                 }
                 raw = body.get("increments") or {}

@@ -7,9 +7,12 @@ berøringsskjerm i Home Assistant, men fungerer også på mobil.
 ## Dette gjør appen
 
 - Lagrer vannvolum, måleskje per produkt, manuelle målinger og tilsetningshistorikk i SQLite.
-  Teststrips kan registreres med pH, alkalinitet, fritt klor og O₂ (aktivt oksygen)
-  hver for seg. Siste verdi og måletidspunkt beholdes for hvert felt.
-- Viser ett neste steg for nytt vann, ukentlig stell, før/etter bad og ferie.
+  Teststrips registreres som ønsket numerisk endring (pluss, minus eller null) for
+  alkalinitet, pH, fritt klor og O₂. Måler registreres med eksakte verdier for
+  alkalinitet, pH og klor; den har ikke O₂. Metode og tidspunkt beholdes for hvert felt.
+- Viser ett neste steg for Bade nå, ferie, nytt vann, etter bad og ukentlig stell.
+  Etter bad og nytt vann kan startes uten måling.
+  Ved nytt vann vises ikke gamle målinger fra forrige fylling som gjeldende.
 - Regner om doser til ml og antall egne skjeer. Faste Sundance-doser er basert på
   **15 ml per Sundance-skje**, også når din egen skje har en annen størrelse.
 - Viser et teoretisk MiniChlor-estimat for ønsket klorøkning, inkludert små
@@ -20,8 +23,9 @@ berøringsskjerm i Home Assistant, men fungerer også på mobil.
   `/api/summary`.
 
 Appen styrer ikke badets pumper eller temperatur. Den avgjør heller ikke om
-vannet er klart for bading.
-O₂-verdien loggføres, men brukes foreløpig ikke til å beregne en dose.
+vannet er klart for bading. Ved for høyt klor eller O₂ stopper Bade nå og ber
+om ny måling. O₂-ønske fra teststrips loggføres, men kan ikke regnes om til en
+eksakt dose; før bad vises Sundances rutinedose.
 
 ## Bruk rett i nettleseren
 
@@ -33,11 +37,14 @@ ikke med hjemmeserverens SQLite-database, Home Assistant eller PoolLab, og kan
 forsvinne hvis nettleserdata slettes. En annen enhet har egne data.
 
 Nye installasjoner starter med 1500 liter. En tidligere lagret verdi beholdes.
-I «Juster verdier» kan du velge økning for alkalinitet, pH, fritt klor og O₂.
-Veiviseren følger alkalinitet → pH → MiniChlor → pumpesyklus → Active Oxygen,
-med ny måling mellom trinnene. SpaCare oppgir ingen pålitelig omregning fra
-Active Oxygen Granular til en bestemt målt O₂-økning. Derfor brukes Sundances
-før-bad-dose når O₂ er valgt, og verdien må kontrolleres etterpå.
+I «Ny måling» velger du teststrips eller måler. Teststrips krever en ønsket
+endring for alle fire feltene, der `+0,2` klor betyr øk med 0,2 mg/L og `−10`
+alkalinitet betyr senk med 10 mg/L. Dette er vurderinger, ikke eksakte
+måleverdier. Etterpå velger du Bade nå eller Ferie. Alkalinitet og pH justeres
+først, med ny måling etter 2 timer. Ved klorøkning vises et teoretisk estimat;
+etter 20 minutter må klor vurderes på nytt før Active Oxygen. SpaCare oppgir
+ingen pålitelig omregning fra Active Oxygen Granular til en bestemt O₂-økning.
+Derfor brukes Sundances før-bad-dose, og verdien må kontrolleres etterpå.
 
 De statiske filene i `docs/` bygges fra Flask-malen og appens produktliste med:
 

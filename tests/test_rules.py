@@ -81,9 +81,58 @@ class RecipeTests(unittest.TestCase):
 
     def test_before_bath_uses_sundances_extra_spoon_after_three_people(self):
         rec = recommendation(flow("before_bath", meta={"bathers": 5}),
-                             {"volume_liters": 1700}, measurement(), [], NOW)
+                             {"volume_liters": 1700}, measurement(chlorine_mg_l=1.2), [], NOW)
         self.assertEqual(rec["product"], "active_oxygen")
         self.assertEqual(rec["amount_ml"], 75)
+
+    def test_strip_changes_follow_alkalinity_then_ph_and_stop_at_high_chlorine(self):
+        strip = measurement(ph=None, alkalinity_mg_l=None, chlorine_mg_l=None,
+                            active_oxygen_mg_l=None,
+                            adjustments={"alkalinity_mg_l": -10, "ph": -0.2,
+                                         "chlorine_mg_l": 0, "active_oxygen_mg_l": 0})
+        settings = {"volume_liters": 1500}
+        first = recommendation(flow("before_bath"), settings, strip, [], NOW)
+        self.assertEqual(first["product"], "alka_down")
+        self.assertEqual(first["amount_ml"], 22.5)
+        strip["adjustments"]["alkalinity_mg_l"] = 0
+        second = recommendation(flow("before_bath"), settings, strip, [], NOW)
+        self.assertEqual(second["product"], "ph_down")
+        strip["adjustments"]["ph"] = 0
+        strip["adjustments"]["chlorine_mg_l"] = -0.2
+        blocked = recommendation(flow("before_bath"), settings, strip, [], NOW)
+        self.assertEqual(blocked["type"], "measure")
+        self.assertEqual(blocked["title"], "For mye klor")
+
+    def test_small_strip_chlorine_rise_is_theoretical_and_requires_recheck(self):
+        strip = measurement(ph=None, alkalinity_mg_l=None, chlorine_mg_l=None,
+                            active_oxygen_mg_l=None,
+                            adjustments={"alkalinity_mg_l": 0, "ph": 0,
+                                         "chlorine_mg_l": 0.2, "active_oxygen_mg_l": 2})
+        settings = {"volume_liters": 1500}
+        first = recommendation(flow("before_bath"), settings, strip, [], NOW)
+        self.assertEqual(first["product"], "mini_chlor")
+        self.assertEqual(first["amount_ml"], 0.545)
+        self.assertTrue(first["estimated"])
+        addition = {"product": "mini_chlor", "flow_id": 1,
+                    "added_at": (NOW - timedelta(minutes=1)).isoformat()}
+        self.assertEqual(recommendation(flow("before_bath"), settings, strip, [addition], NOW)["type"], "wait")
+        addition["added_at"] = (NOW - timedelta(minutes=21)).isoformat()
+        strip["measured_at"] = (NOW - timedelta(minutes=2)).isoformat()
+        self.assertEqual(recommendation(flow("before_bath"), settings, strip, [addition], NOW)["type"], "measure")
+        strip["measured_at"] = (NOW - timedelta(seconds=20)).isoformat()
+        strip["adjustments"]["chlorine_mg_l"] = 0
+        next_step = recommendation(flow("before_bath"), settings, strip, [addition], NOW)
+        self.assertEqual(next_step["product"], "active_oxygen")
+        self.assertIn("Ønsket O₂-økning", next_step["description"])
+
+    def test_after_bath_waits_for_oxygen_cycle_without_measurement(self):
+        addition = {"product": "active_oxygen", "flow_id": 4,
+                    "added_at": (NOW - timedelta(minutes=3)).isoformat()}
+        waiting = recommendation(flow("after_bath"), {"volume_liters": 1500}, None, [addition], NOW)
+        self.assertEqual(waiting["type"], "wait")
+        addition["added_at"] = (NOW - timedelta(minutes=21)).isoformat()
+        ready = recommendation(flow("after_bath"), {"volume_liters": 1500}, None, [addition], NOW)
+        self.assertEqual(ready["product"], "mini_chlor")
 
     def test_holiday_enforces_five_minute_gap_then_volume_dose(self):
         meta = {"departure_date": "2026-09-26", "return_date": "2026-10-03"}

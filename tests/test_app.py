@@ -60,9 +60,6 @@ class AppTests(unittest.TestCase):
             "kind": "holiday", "departure_date": date.today().isoformat(),
             "return_date": (date.today() + timedelta(days=7)).isoformat(),
         })
-        self.assertEqual(self.client.get("/api/summary").json["next_step"]["type"], "measure")
-        self.client.post("/api/measurements", json={"ph": 7.2, "alkalinity_mg_l": 100,
-                                                     "chlorine_mg_l": 0.2})
         self.assertEqual(self.client.get("/api/summary").json["next_step"]["type"], "check")
         self.client.post("/api/confirm", json={})  # filter
         self.client.post("/api/confirm", json={})  # MiniChlor
@@ -192,6 +189,55 @@ class AppTests(unittest.TestCase):
         summary = migrated.get("/api/summary").json
         self.assertEqual(summary["measurements"]["active_oxygen_mg_l"], 6)
         self.assertEqual(summary["measurements"]["ph"], 7.1)
+
+    def test_strips_store_desired_changes_without_pretending_they_are_values(self):
+        response = self.client.post("/api/measurements", json={
+            "method": "strip", "adjustments": {
+                "ph": -0.2, "alkalinity_mg_l": 10,
+                "chlorine_mg_l": 0.2, "active_oxygen_mg_l": 2,
+            },
+        })
+        self.assertEqual(response.status_code, 201)
+        summary = create_app({"TESTING": True, "DB_PATH": self.db_path}).test_client().get("/api/summary").json
+        self.assertEqual(summary["measurements"]["method"], "strip")
+        for field in ("ph", "alkalinity_mg_l", "chlorine_mg_l", "active_oxygen_mg_l"):
+            self.assertIsNone(summary["measurements"][field])
+        self.assertEqual(summary["measurements"]["adjustments"]["chlorine_mg_l"], 0.2)
+        self.client.post("/api/flows", json={"kind": "before_bath"})
+        step = self.client.get("/api/summary").json["next_step"]
+        self.assertEqual(step["product"], "alka_up")
+        self.assertEqual(step["amount_ml"], 34)
+
+    def test_machine_has_only_three_values_and_high_chlorine_stops_dosing(self):
+        invalid = self.client.post("/api/measurements", json={
+            "method": "machine", "ph": 7.2, "alkalinity_mg_l": 100,
+            "chlorine_mg_l": 4, "active_oxygen_mg_l": 6,
+        })
+        self.assertEqual(invalid.status_code, 400)
+        self.client.post("/api/measurements", json={
+            "method": "machine", "ph": 7.2, "alkalinity_mg_l": 100, "chlorine_mg_l": 4,
+        })
+        self.client.post("/api/flows", json={"kind": "before_bath"})
+        step = self.client.get("/api/summary").json["next_step"]
+        self.assertEqual(step["type"], "measure")
+        self.assertIn("For mye klor", step["title"])
+        self.assertEqual(self.client.post("/api/confirm", json={}).status_code, 400)
+        self.client.post("/api/flows", json={"kind": "after_bath"})
+        self.assertEqual(self.client.get("/api/summary").json["next_step"]["type"], "done")
+
+    def test_after_bath_and_new_water_work_without_measurement(self):
+        fresh_path = str(Path(self.directory.name) / "empty.sqlite3")
+        fresh = create_app({"TESTING": True, "DB_PATH": fresh_path}).test_client()
+        fresh.post("/api/flows", json={"kind": "after_bath"})
+        self.assertEqual(fresh.get("/api/summary").json["next_step"]["product"], "mini_chlor")
+        fresh.post("/api/flows", json={"kind": "new_water"})
+        self.assertEqual(fresh.get("/api/summary").json["next_step"]["product"], "no_scale")
+
+    def test_new_water_invalidates_readings_from_previous_fill(self):
+        self.client.post("/api/flows", json={"kind": "new_water"})
+        self.assertIsNone(self.client.get("/api/summary").json["measurements"]["chlorine_mg_l"])
+        self.client.post("/api/flows", json={"kind": "before_bath"})
+        self.assertEqual(self.client.get("/api/summary").json["next_step"]["type"], "measure")
 
 
 if __name__ == "__main__":
