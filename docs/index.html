@@ -94,17 +94,17 @@
         <label><input type="radio" name="method" value="machine"> Måler</label>
       </fieldset>
       <div id="strip-fields" class="measurement-fields">
-        <p>Velg hvor mye hver verdi bør endres ut fra fargene på stripsen. <strong>+ øke · − senke · 0 ingen endring.</strong> Dette er ikke eksakte målinger.</p>
-        <label>Alkalinitet, ønsket endring (mg/L)<input name="strip_alkalinity_mg_l" type="number" min="-100" max="100" step="1" inputmode="decimal" value="0" required><small>For eksempel +10 hvis den virker for lav.</small></label>
-        <label>pH, ønsket endring<input name="strip_ph" type="number" min="-1" max="1" step="0.1" inputmode="decimal" value="0" required><small>For eksempel −0,2 hvis den virker for høy.</small></label>
-        <label>Klor, ønsket endring (mg/L)<input name="strip_chlorine_mg_l" type="number" min="-3" max="3" step="0.1" inputmode="decimal" value="0" required><small>For eksempel +0,2. Velg minus hvis klor er for høyt.</small></label>
-        <label>O₂, ønsket endring (mg/L)<input name="strip_active_oxygen_mg_l" type="number" min="-10" max="10" step="0.1" inputmode="decimal" value="0" required><small>Ønsket O₂-økning kan ikke regnes direkte om til skjeer.</small></label>
+        <p>Velg hvor mye hver verdi bør endres ut fra fargene på stripsen. Velg <strong>Øk</strong> eller <strong>Senk</strong>; skriv 0 for ingen endring. Dette er ikke eksakte målinger.</p>
+        <div class="strip-control"><span>Alkalinitet, ønsket endring (mg/L)</span><div class="strip-entry"><select name="strip_alkalinity_mg_l_direction" aria-label="Retning for alkalinitet"><option value="1">Øk</option><option value="-1">Senk</option></select><input name="strip_alkalinity_mg_l" aria-label="Endring i alkalinitet" type="number" min="0" step="any" inputmode="decimal" value="0"></div><small>For eksempel 10 når du vil øke med 10 mg/L.</small></div>
+        <div class="strip-control"><span>pH, ønsket endring</span><div class="strip-entry"><select name="strip_ph_direction" aria-label="Retning for pH"><option value="1">Øk</option><option value="-1">Senk</option></select><input name="strip_ph" aria-label="Endring i pH" type="number" min="0" step="any" inputmode="decimal" value="0"></div><small>For eksempel 0,25 når du vil senke pH med 0,25.</small></div>
+        <div class="strip-control"><span>Klor, ønsket endring (mg/L)</span><div class="strip-entry"><select name="strip_chlorine_mg_l_direction" aria-label="Retning for klor"><option value="1">Øk</option><option value="-1">Senk</option></select><input name="strip_chlorine_mg_l" aria-label="Endring i klor" type="number" min="0" step="any" inputmode="decimal" value="0"></div><small>Velg Senk hvis klor virker for høyt.</small></div>
+        <div class="strip-control"><span>O₂, ønsket endring (mg/L)</span><div class="strip-entry"><select name="strip_active_oxygen_mg_l_direction" aria-label="Retning for O₂"><option value="1">Øk</option><option value="-1">Senk</option></select><input name="strip_active_oxygen_mg_l" aria-label="Endring i O₂" type="number" min="0" step="any" inputmode="decimal" value="0"></div><small>Ønsket O₂-økning kan ikke regnes direkte om til skjeer.</small></div>
       </div>
       <div id="machine-fields" class="measurement-fields" hidden>
         <p>Skriv inn de nøyaktige verdiene fra måleren. Den måler klor, alkalinitet og pH, men ikke O₂.</p>
-        <label>Alkalinitet (mg/L)<input name="alkalinity_mg_l" type="number" min="0" max="500" step="1" inputmode="decimal" placeholder="f.eks. 100"></label>
-        <label>pH<input name="ph" type="number" min="0" max="14" step="0.1" inputmode="decimal" placeholder="f.eks. 7,2"></label>
-        <label>Fritt klor (mg/L)<input name="chlorine_mg_l" type="number" min="0" max="20" step="0.1" inputmode="decimal" placeholder="f.eks. 0,2"></label>
+        <label>Alkalinitet (mg/L)<input name="alkalinity_mg_l" type="number" min="0" step="any" inputmode="decimal" placeholder="f.eks. 100"></label>
+        <label>pH<input name="ph" type="number" min="0" step="any" inputmode="decimal" placeholder="f.eks. 7,25"></label>
+        <label>Fritt klor (mg/L)<input name="chlorine_mg_l" type="number" min="0" step="any" inputmode="decimal" placeholder="f.eks. 0,25"></label>
       </div>
       <button type="submit" class="button button-primary">Lagre vurdering</button>
     </form>
@@ -114,7 +114,7 @@
     <form id="settings-form" class="dialog-form">
       <div class="dialog-head"><h2>Innstillinger</h2><button type="button" class="dialog-close" aria-label="Lukk"><span class="icon icon-close" aria-hidden="true"></span></button></div>
       <p>Oppgi badets vannvolum og størrelsen på hver måleskje. Flytende produkter vises også i ml.</p>
-      <label>Bassengvolum (liter) <input name="volume_liters" type="number" min="100" max="10000" step="1" required value="1500"></label>
+      <label>Bassengvolum (liter) <input name="volume_liters" type="number" min="0" step="any" required value="1500"></label>
       <h3>Måleskje per produkt</h3>
       <div id="scoop-fields" class="scoop-fields"></div>
       <button type="submit" class="button button-primary">Lagre innstillinger</button>
@@ -144,10 +144,10 @@
       <div class="dialog-head"><h2>Ønsket økning</h2><button type="button" class="dialog-close" aria-label="Lukk"><span class="icon icon-close" aria-hidden="true"></span></button></div>
       <p>Skriv økningen fra siste måling. La felt stå tomt hvis verdien ikke skal økes. Alkalinitet og pH kontrolleres alltid først.</p>
       <div class="adjust-grid">
-        <label>Alkalinitet + (mg/L)<small id="adjust-current-alkalinity">Sist målt: —</small><input name="alkalinity_mg_l" type="number" min="1" max="100" step="1" inputmode="decimal" placeholder="f.eks. 10"></label>
-        <label>pH +<small id="adjust-current-ph">Sist målt: —</small><input name="ph" type="number" min="0.01" max="1" step="0.01" inputmode="decimal" placeholder="f.eks. 0,2"></label>
-        <label>Klor + (mg/L)<small id="adjust-current-chlorine">Sist målt: —</small><input name="chlorine_mg_l" type="number" min="0.01" max="3" step="0.01" inputmode="decimal" placeholder="f.eks. 0,2"></label>
-        <label>O₂ + (mg/L)<small id="adjust-current-oxygen">Sist målt: —</small><input name="active_oxygen_mg_l" type="number" min="0.1" max="10" step="0.1" inputmode="decimal" placeholder="f.eks. 2"></label>
+        <label>Alkalinitet + (mg/L)<small id="adjust-current-alkalinity">Sist målt: —</small><input name="alkalinity_mg_l" type="number" min="0" step="any" inputmode="decimal" placeholder="f.eks. 10,25"></label>
+        <label>pH +<small id="adjust-current-ph">Sist målt: —</small><input name="ph" type="number" min="0" step="any" inputmode="decimal" placeholder="f.eks. 0,25"></label>
+        <label>Klor + (mg/L)<small id="adjust-current-chlorine">Sist målt: —</small><input name="chlorine_mg_l" type="number" min="0" step="any" inputmode="decimal" placeholder="f.eks. 0,25"></label>
+        <label>O₂ + (mg/L)<small id="adjust-current-oxygen">Sist målt: —</small><input name="active_oxygen_mg_l" type="number" min="0" step="any" inputmode="decimal" placeholder="f.eks. 2,25"></label>
       </div>
       <p class="adjust-note">O₂ kan ikke beregnes direkte fra ønsket mg/L-økning. Veiviseren viser Sundances dose før bad og ber om ny måling.</p>
       <button type="submit" class="button button-primary">Start justering</button>

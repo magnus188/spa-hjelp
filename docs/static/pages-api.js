@@ -60,7 +60,10 @@
     }
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) throw new Error(`${name} må være et tall.`);
-    if (parsed < low || parsed > high) throw new Error(`${name} må være mellom ${low} og ${high}.`);
+    if (low !== null && parsed < low) {
+      throw new Error(low === 0 ? `${name} kan ikke være negativ.` : `${name} må være minst ${low}.`);
+    }
+    if (high !== null && parsed > high) throw new Error(`${name} må være høyst ${high}.`);
     return parsed;
   }
 
@@ -416,17 +419,19 @@
         }
         const change = stripChange(measurement, 'chlorine_mg_l', now);
         const chlorine = measurement?.chlorine_mg_l;
-        const delta = change !== null ? change : chlorine != null ? Math.max(0, 1 - chlorine) : 0;
-        if (delta > 0) {
+        const requestedDelta = change !== null ? change : chlorine != null ? Math.max(0, 1 - chlorine) : 0;
+        if (requestedDelta > 0) {
           const previousOxygen = latestProductAddition(additions, 'active_oxygen');
           if (previousOxygen) {
             const until = Date.parse(previousOxygen.added_at) + 20 * 60 * 1000;
             if (now < until) return message('wait', 'Vent før MiniChlor',
               'Active Oxygen og MiniChlor skal ikke tilsettes samtidig.', { until: new Date(until).toISOString() });
           }
+          const delta = Math.min(requestedDelta, 3);
+          const firstStep = requestedDelta > delta ? ` Første trinn er begrenset til ${delta} mg/L; vurder resten etter ny måling.` : '';
           const amount = chlorineEstimate(delta, volume, 15, chlorine).amount_ml;
           return dose('mini_chlor', amount,
-            `Teoretisk estimat for ønsket klorøkning på ${delta} mg/L. Vannet kan forbruke klor; mål på nytt etterpå.`,
+            `Teoretisk estimat for ønsket klorøkning på ${requestedDelta} mg/L.${firstStep} Vannet kan forbruke klor; mål på nytt etterpå.`,
             SOURCES.mini_chlor, 'La pumpe 1 gå, og tilsett over filteret.', true, true);
         }
         const previous = latestProductAddition(additions, 'mini_chlor');
@@ -567,9 +572,9 @@
       if (!['legacy', 'strip', 'machine'].includes(method)) throw new Error('Velg teststrips eller måler.');
       let values;
       if (method === 'strip') {
-        const limits = {
-          ph: ['pH', -1, 1], alkalinity_mg_l: ['Alkalinitet', -100, 100],
-          chlorine_mg_l: ['Klor', -3, 3], active_oxygen_mg_l: ['O₂', -10, 10],
+        const names = {
+          ph: 'pH', alkalinity_mg_l: 'Alkalinitet',
+          chlorine_mg_l: 'Klor', active_oxygen_mg_l: 'O₂',
         };
         const raw = body?.adjustments;
         if (!raw || typeof raw !== 'object' || Array.isArray(raw) ||
@@ -578,20 +583,21 @@
         }
         values = Object.fromEntries(FIELDS.map((field) => [field, null]));
         values.adjustments = Object.fromEntries(FIELDS.map((field) => {
-          const [label, low, high] = limits[field];
-          return [field, number(raw[field], label, low, high)];
+          return [field, round(number(raw[field], names[field], null, null), 2)];
         }));
       } else {
         if (method === 'machine' && body?.active_oxygen_mg_l != null && body.active_oxygen_mg_l !== '') {
           throw new Error('Måleren har ikke O₂-verdi. Bruk teststrips for O₂.');
         }
         values = {
-          ph: number(body?.ph, 'pH', 0, 14, false),
-          alkalinity_mg_l: number(body?.alkalinity_mg_l, 'Alkalinitet', 0, 500, false),
-          chlorine_mg_l: number(body?.chlorine_mg_l, 'Klor', 0, 20, false),
-          active_oxygen_mg_l: number(body?.active_oxygen_mg_l, 'Aktivt oksygen', 0, 50, false),
+          ph: number(body?.ph, 'pH', 0, null, false),
+          alkalinity_mg_l: number(body?.alkalinity_mg_l, 'Alkalinitet', 0, null, false),
+          chlorine_mg_l: number(body?.chlorine_mg_l, 'Klor', 0, null, false),
+          active_oxygen_mg_l: number(body?.active_oxygen_mg_l, 'Aktivt oksygen', 0, null, false),
         };
         if (FIELDS.every((field) => values[field] === null)) throw new Error('Legg inn minst én måleverdi.');
+        values = Object.fromEntries(FIELDS.map((field) =>
+          [field, values[field] === null ? null : round(values[field], 2)]));
       }
       data.measurements.push({ id: data.next_id++, measured_at: stamp(), ...values, method, source: 'manual' });
       saveData(data);

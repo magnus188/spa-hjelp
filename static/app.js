@@ -51,7 +51,7 @@ function renderReadings() {
   const measurement = state.measurements;
   const fields = [
     ['ph', 'ph', '', 2],
-    ['alkalinity', 'alkalinity_mg_l', ' mg/L', 0],
+    ['alkalinity', 'alkalinity_mg_l', ' mg/L', 2],
     ['chlorine', 'chlorine_mg_l', ' mg/L', 2],
     ['oxygen', 'active_oxygen_mg_l', ' mg/L', 2],
   ];
@@ -70,7 +70,7 @@ function renderReadings() {
     }
   }
   const source = measurement.method === 'strip' ? 'teststrips' : measurement.method === 'machine' ? 'måler' : 'manuelt';
-  $('#last-measured').textContent = `Sist vurdert: ${localDate(measurement.measured_at)}${measurement.measured_at ? ` · ${source}` : ''} · ${fmt(state.volume_liters, 0)} L`;
+  $('#last-measured').textContent = `Sist vurdert: ${localDate(measurement.measured_at)}${measurement.measured_at ? ` · ${source}` : ''} · ${fmt(state.volume_liters, 2)} L`;
   $('#adjust-open').disabled = !['machine', 'legacy'].includes(measurement.method);
 }
 
@@ -148,6 +148,10 @@ function render() {
 function openDialog(selector) { $(selector).showModal(); }
 function closeDialog(dialog) { dialog.close(); }
 function numberOrNull(value) { return value.trim() === '' ? null : Number(value.replace(',', '.')); }
+function twoDecimalsOrNull(value) {
+  const parsed = numberOrNull(value);
+  return parsed === null ? null : Math.round((parsed + Number.EPSILON) * 100) / 100;
+}
 
 function updateMeasurementMethod() {
   const form = $('#measurement-form');
@@ -193,10 +197,13 @@ $('#measurement-form').addEventListener('submit', (event) => {
   const method = form.elements.method.value;
   const fields = ['ph', 'alkalinity_mg_l', 'chlorine_mg_l', 'active_oxygen_mg_l'];
   const body = method === 'strip' ? {
-    method, adjustments: Object.fromEntries(fields.map((key) => [key, numberOrNull(form.elements[`strip_${key}`].value)])),
+    method, adjustments: Object.fromEntries(fields.map((key) => {
+      const magnitude = twoDecimalsOrNull(form.elements[`strip_${key}`].value) ?? 0;
+      return [key, magnitude * Number(form.elements[`strip_${key}_direction`].value)];
+    })),
   } : {
     method, ...Object.fromEntries(fields.filter((key) => key !== 'active_oxygen_mg_l')
-      .map((key) => [key, numberOrNull(form.elements[key].value)])),
+      .map((key) => [key, twoDecimalsOrNull(form.elements[key].value)])),
   };
   run(async () => { await api('/api/measurements', body); form.reset(); updateMeasurementMethod(); closeDialog($('#measurement-dialog')); }, 'Vurderingen er lagret. Velg hva du vil gjøre.');
 });
@@ -205,15 +212,15 @@ function openSettings() {
   const form = $('#settings-form');
   form.elements.volume_liters.value = state.volume_liters ?? '';
   $('#scoop-fields').innerHTML = Object.entries(state.products).map(([key, product]) =>
-    `<label>${text(product.name)} (ml)<input type="number" name="${text(key)}" min="0.1" max="500" step="0.1" required value="${state.scoops[key]}"></label>`).join('');
+    `<label>${text(product.name)} (ml)<input type="number" name="${text(key)}" min="0" step="any" required value="${state.scoops[key]}"></label>`).join('');
   openDialog('#settings-dialog');
 }
 
 $('#settings-form').addEventListener('submit', (event) => {
   event.preventDefault();
   const form = event.currentTarget;
-  const scoops = Object.fromEntries(Object.keys(state.products).map((key) => [key, Number(form.elements[key].value)]));
-  run(async () => { await api('/api/settings', { volume_liters: Number(form.elements.volume_liters.value), scoops }); closeDialog($('#settings-dialog')); }, 'Innstillingene er lagret.');
+  const scoops = Object.fromEntries(Object.keys(state.products).map((key) => [key, twoDecimalsOrNull(form.elements[key].value)]));
+  run(async () => { await api('/api/settings', { volume_liters: twoDecimalsOrNull(form.elements.volume_liters.value), scoops }); closeDialog($('#settings-dialog')); }, 'Innstillingene er lagret.');
 });
 
 document.querySelectorAll('[data-mode]').forEach((button) => button.addEventListener('click', () => {
@@ -252,7 +259,7 @@ $('#adjust-form').addEventListener('submit', (event) => {
   const form = event.currentTarget;
   const increments = Object.fromEntries(
     ['alkalinity_mg_l', 'ph', 'chlorine_mg_l', 'active_oxygen_mg_l']
-      .map((field) => [field, numberOrNull(form.elements[field].value)])
+      .map((field) => [field, twoDecimalsOrNull(form.elements[field].value)])
       .filter(([, value]) => value != null)
   );
   run(async () => {

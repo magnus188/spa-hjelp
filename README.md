@@ -37,9 +37,11 @@ ikke med hjemmeserverens SQLite-database, Home Assistant eller PoolLab, og kan
 forsvinne hvis nettleserdata slettes. En annen enhet har egne data.
 
 Nye installasjoner starter med 1500 liter. En tidligere lagret verdi beholdes.
-I «Ny måling» velger du teststrips eller måler. Teststrips krever en ønsket
-endring for alle fire feltene, der `+0,2` klor betyr øk med 0,2 mg/L og `−10`
-alkalinitet betyr senk med 10 mg/L. Dette er vurderinger, ikke eksakte
+I «Ny måling» velger du teststrips eller måler. For hvert felt på teststrips
+velger du «Øk» eller «Senk» og skriver en verdi uten fortegn. For eksempel
+betyr «Øk» og `0,2` klor en økning på 0,2 mg/L; «Senk» og `10`
+alkalinitet betyr en reduksjon på 10 mg/L. Tallfeltene tillater desimaler og
+lagrer høyst to desimaler. Dette er vurderinger, ikke eksakte
 måleverdier. Etterpå velger du Bade nå eller Ferie. Alkalinitet og pH justeres
 først, med ny måling etter 2 timer. Ved klorøkning vises et teoretisk estimat;
 etter 20 minutter må klor vurderes på nytt før Active Oxygen. SpaCare oppgir

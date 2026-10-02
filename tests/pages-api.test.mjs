@@ -35,8 +35,8 @@ const estimate = await api('/api/chlorine-estimate', { delta_mg_l: 0.2 });
 assert.equal(estimate.amount_ml, 0.618);
 assert.equal(estimate.scoops, 0.0618);
 assert.equal(estimate.hard_to_measure, true);
-await assert.rejects(api('/api/measurements', { active_oxygen_mg_l: 60 }),
-  /Aktivt oksygen må være mellom/);
+await assert.rejects(api('/api/measurements', { active_oxygen_mg_l: -0.01 }),
+  /kan ikke være negativ/);
 
 await api('/api/flows', { kind: 'weekly' });
 summary = await api('/api/summary');
@@ -142,5 +142,31 @@ assert.equal((await api('/api/summary')).next_step.product, 'active_oxygen');
 await api('/api/confirm', {});
 await api('/api/flows', { kind: 'after_bath' });
 assert.equal((await api('/api/summary')).next_step.type, 'wait');
+
+saved.clear();
+api = client();
+await api('/api/settings', { volume_liters: 1700 });
+await api('/api/measurements', { method: 'machine', ph: 7.256,
+  alkalinity_mg_l: 100.125, chlorine_mg_l: 0.256 });
+summary = await api('/api/summary');
+assert.equal(summary.measurements.ph, 7.26);
+assert.equal(summary.measurements.alkalinity_mg_l, 100.13);
+assert.equal(summary.measurements.chlorine_mg_l, 0.26);
+await assert.rejects(api('/api/measurements', { method: 'machine', ph: -0.01 }),
+  /kan ikke være negativ/);
+await api('/api/measurements', { method: 'strip', adjustments: {
+  ph: -0.254, alkalinity_mg_l: 0, chlorine_mg_l: 4.126, active_oxygen_mg_l: 0,
+} });
+summary = await api('/api/summary');
+assert.equal(summary.measurements.adjustments.ph, -0.25);
+await api('/api/measurements', { method: 'strip', adjustments: {
+  ph: 0, alkalinity_mg_l: 0, chlorine_mg_l: 4.126, active_oxygen_mg_l: 0,
+} });
+await api('/api/flows', { kind: 'before_bath' });
+summary = await api('/api/summary');
+assert.equal(summary.measurements.adjustments.chlorine_mg_l, 4.13);
+assert.equal(summary.next_step.product, 'mini_chlor');
+assert.match(summary.next_step.description, /Første trinn/);
+assert.equal(summary.next_step.amount_ml, 9.273);
 
 console.log('GitHub Pages API: målinger, doser, timer og ferie fungerer.');

@@ -374,15 +374,17 @@ def recommendation(flow: dict | None, settings: dict, measurement: dict | None,
                     return message("measure", "Mål klor på nytt", "Registrer en ny klorvurdering etter MiniChlor før neste produkt.")
             change = strip_change(measurement, "chlorine_mg_l", now)
             chlorine = measurement.get("chlorine_mg_l")
-            delta = change if change is not None else max(0, 1 - chlorine) if chlorine is not None else 0
-            if delta > 0:
+            requested_delta = change if change is not None else max(0, 1 - chlorine) if chlorine is not None else 0
+            if requested_delta > 0:
                 previous_oxygen = latest_product_addition(additions, "active_oxygen")
                 if previous_oxygen:
                     until = parse_time(previous_oxygen["added_at"]) + timedelta(minutes=20)
                     if now < until:
                         return message("wait", "Vent før MiniChlor", "Active Oxygen og MiniChlor skal ikke tilsettes samtidig.", until=iso_time(until))
+                delta = min(requested_delta, 3)
+                first_step = f" Første trinn er begrenset til {delta:g} mg/L; vurder resten etter ny måling." if requested_delta > delta else ""
                 amount = chlorine_estimate(delta, volume, 15, chlorine)["amount_ml"]
-                return dose("mini_chlor", amount, f"Teoretisk estimat for ønsket klorøkning på {delta:g} mg/L. Vannet kan forbruke klor; mål på nytt etterpå.",
+                return dose("mini_chlor", amount, f"Teoretisk estimat for ønsket klorøkning på {requested_delta:g} mg/L.{first_step} Vannet kan forbruke klor; mål på nytt etterpå.",
                             SPACARE_MINICHLOR, estimated=True, balance=True)
             previous = latest_product_addition(additions, "mini_chlor")
             if previous:

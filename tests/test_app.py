@@ -143,11 +143,20 @@ class AppTests(unittest.TestCase):
                                                      "chlorine_mg_l": 0.1})
         self.assertEqual(self.client.get("/api/summary").json["next_step"]["type"], "done")
 
-    def test_invalid_reading_rejected(self):
-        bad = self.client.post("/api/measurements", json={"ph": 17})
+    def test_negative_readings_are_rejected_and_decimals_are_rounded(self):
+        bad = self.client.post("/api/measurements", json={"ph": -0.01})
         self.assertEqual(bad.status_code, 400)
-        bad_oxygen = self.client.post("/api/measurements", json={"active_oxygen_mg_l": 60})
+        bad_oxygen = self.client.post("/api/measurements", json={"active_oxygen_mg_l": -0.01})
         self.assertEqual(bad_oxygen.status_code, 400)
+        accepted = self.client.post("/api/measurements", json={
+            "method": "machine", "ph": 7.256, "alkalinity_mg_l": 100.25,
+            "chlorine_mg_l": 0.256,
+        })
+        self.assertEqual(accepted.status_code, 201)
+        readings = self.client.get("/api/summary").json["measurements"]
+        self.assertEqual(readings["ph"], 7.26)
+        self.assertEqual(readings["alkalinity_mg_l"], 100.25)
+        self.assertEqual(readings["chlorine_mg_l"], 0.26)
 
     def test_oxygen_only_reading_keeps_other_values_and_chlorine_estimate(self):
         response = self.client.post("/api/measurements", json={"active_oxygen_mg_l": 5})
@@ -207,6 +216,20 @@ class AppTests(unittest.TestCase):
         step = self.client.get("/api/summary").json["next_step"]
         self.assertEqual(step["product"], "alka_up")
         self.assertEqual(step["amount_ml"], 34)
+
+    def test_large_strip_request_is_accepted_but_chlorine_is_dosed_in_one_step(self):
+        self.client.post("/api/measurements", json={
+            "method": "strip", "adjustments": {
+                "ph": 0, "alkalinity_mg_l": 0,
+                "chlorine_mg_l": 4.126, "active_oxygen_mg_l": 0,
+            },
+        })
+        self.client.post("/api/flows", json={"kind": "before_bath"})
+        summary = self.client.get("/api/summary").json
+        self.assertEqual(summary["measurements"]["adjustments"]["chlorine_mg_l"], 4.13)
+        self.assertEqual(summary["next_step"]["product"], "mini_chlor")
+        self.assertIn("Første trinn", summary["next_step"]["description"])
+        self.assertAlmostEqual(summary["next_step"]["amount_ml"], 9.273, places=3)
 
     def test_machine_has_only_three_values_and_high_chlorine_stops_dosing(self):
         invalid = self.client.post("/api/measurements", json={

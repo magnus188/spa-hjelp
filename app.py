@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import math
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -15,7 +16,8 @@ from storage import (active_flow, advance_flow, connect, finish_flow, get_settin
                      save_measurement, save_settings, start_flow)
 
 
-def _number(value, name: str, low: float, high: float, required: bool = True) -> float | None:
+def _number(value, name: str, low: float | None, high: float | None,
+            required: bool = True) -> float | None:
     if value is None or value == "":
         if required:
             raise ValueError(f"{name} må fylles ut.")
@@ -24,8 +26,12 @@ def _number(value, name: str, low: float, high: float, required: bool = True) ->
         number = float(value)
     except (TypeError, ValueError):
         raise ValueError(f"{name} må være et tall.") from None
-    if not low <= number <= high:
-        raise ValueError(f"{name} må være mellom {low:g} og {high:g}.")
+    if not math.isfinite(number):
+        raise ValueError(f"{name} må være et tall.")
+    if low is not None and number < low:
+        raise ValueError(f"{name} kan ikke være negativ." if low == 0 else f"{name} må være minst {low:g}.")
+    if high is not None and number > high:
+        raise ValueError(f"{name} må være høyst {high:g}.")
     return number
 
 
@@ -126,29 +132,30 @@ def create_app(test_config: dict | None = None) -> Flask:
             raise ValueError("Velg teststrips eller måler.")
         fields = ("ph", "alkalinity_mg_l", "chlorine_mg_l", "active_oxygen_mg_l")
         if method == "strip":
-            ranges = {
-                "ph": ("pH", -1, 1),
-                "alkalinity_mg_l": ("Alkalinitet", -100, 100),
-                "chlorine_mg_l": ("Klor", -3, 3),
-                "active_oxygen_mg_l": ("O₂", -10, 10),
+            names = {
+                "ph": "pH", "alkalinity_mg_l": "Alkalinitet",
+                "chlorine_mg_l": "Klor", "active_oxygen_mg_l": "O₂",
             }
             raw = body.get("adjustments")
-            if not isinstance(raw, dict) or set(raw) != set(ranges):
+            if not isinstance(raw, dict) or set(raw) != set(names):
                 raise ValueError("Fyll inn ønsket endring for alle fire feltene på teststrips.")
             values = {field: None for field in fields}
-            values["adjustments"] = {field: _number(raw[field], name, low, high)
-                                     for field, (name, low, high) in ranges.items()}
+            # Older clients send signed changes; the form now uses a direction selector.
+            values["adjustments"] = {field: round(_number(raw[field], name, None, None), 2)
+                                     for field, name in names.items()}
         else:
             if method == "machine" and body.get("active_oxygen_mg_l") not in (None, ""):
                 raise ValueError("Måleren har ikke O₂-verdi. Bruk teststrips for O₂.")
             values = {
-                "ph": _number(body.get("ph"), "pH", 0, 14, required=False),
-                "alkalinity_mg_l": _number(body.get("alkalinity_mg_l"), "Alkalinitet", 0, 500, required=False),
-                "chlorine_mg_l": _number(body.get("chlorine_mg_l"), "Klor", 0, 20, required=False),
-                "active_oxygen_mg_l": _number(body.get("active_oxygen_mg_l"), "Aktivt oksygen", 0, 50, required=False),
+                "ph": _number(body.get("ph"), "pH", 0, None, required=False),
+                "alkalinity_mg_l": _number(body.get("alkalinity_mg_l"), "Alkalinitet", 0, None, required=False),
+                "chlorine_mg_l": _number(body.get("chlorine_mg_l"), "Klor", 0, None, required=False),
+                "active_oxygen_mg_l": _number(body.get("active_oxygen_mg_l"), "Aktivt oksygen", 0, None, required=False),
             }
             if all(values[key] is None for key in fields):
                 raise ValueError("Legg inn minst én måleverdi.")
+            values = {field: round(value, 2) if value is not None else None
+                      for field, value in values.items()}
         values["method"] = method
         values["source"] = "manual"
         with connect(app.config["DB_PATH"]) as db:

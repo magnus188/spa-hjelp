@@ -10,7 +10,7 @@ function renderCard() {
   if (!cardState) return;
   const readings = cardState.measurements;
   document.querySelector('#card-ph').textContent = reading(readings, 'ph', 2);
-  document.querySelector('#card-ta').textContent = reading(readings, 'alkalinity_mg_l', 0, ' mg/L');
+  document.querySelector('#card-ta').textContent = reading(readings, 'alkalinity_mg_l', 2, ' mg/L');
   document.querySelector('#card-chlorine').textContent = reading(readings, 'chlorine_mg_l', 2, ' mg/L');
   document.querySelector('#card-oxygen').textContent = reading(readings, 'active_oxygen_mg_l', 2, ' mg/L');
   const status = document.querySelector('#card-status');
